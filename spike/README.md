@@ -32,6 +32,8 @@ Note SDK: i client "2025" (con `initialize`) sono serviti dal fallback stateless
 cloudflared tunnel --url http://localhost:3000     # oppure: ngrok http 3000
 PUBLIC_URL=https://xxxx.trycloudflare.com PORT=3000 npm start
 ```
+Scorciatoia (Windows): `powershell -ExecutionPolicy Bypass -File run.ps1` avvia il tunnel Cloudflare, legge l'URL pubblico e lancia il server con `PUBLIC_URL` gia' impostato; Ctrl+C ferma tutto. Richiede `winget install Cloudflare.cloudflared`. Lo script e' solo controllato nella sintassi, mai eseguito. Mentre gira il server e' pubblico su Internet.
+
 (Cloudflared/ngrok NON eseguiti in questo spike. Verificare che il tunnel non bufferizzi/tronchi le risposte long-poll da 25 s.)
 
 ## Uso
