@@ -126,6 +126,11 @@ export function startServer(opts: { port?: number; log?: (s: string) => void; pu
 claude mcp add -t http -H "Authorization: Bearer $AGENT_OFFICE_TOKEN" agent-office ${base}/mcp`,
           codexConfigToml: `# UNTESTED
 [mcp_servers.agent-office]\nurl = "${base}/mcp"\nbearer_token_env_var = "AGENT_OFFICE_TOKEN"\n# and: export AGENT_OFFICE_TOKEN=${p.token}`,
+          claudeCodePowerShell: `$env:AGENT_OFFICE_TOKEN = "${p.token}"
+claude mcp add -t http -H "Authorization: Bearer $env:AGENT_OFFICE_TOKEN" agent-office ${base}/mcp`,
+          codexPowerShell: `# UNTESTED. Persist the variable, then restart Codex:
+setx AGENT_OFFICE_TOKEN "${p.token}"
+# then add the config.toml block below to ~/.codex/config.toml`,
           pathFallbackUrl: `${base}/mcp/${p.token}` } });
       }
       if (path === '/' || path === '/index.html') return void res.writeHead(200, { 'content-type': 'text/html' }).end(readFileSync(publicDir + 'index.html'));

@@ -2,18 +2,46 @@
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Agent Office spike</title>
 <style>
-body{font:14px system-ui;margin:0;display:grid;grid-template-columns:1fr 220px;height:100vh}
+body{font:14px system-ui;margin:0;display:grid;grid-template-columns:1fr 220px;grid-template-rows:auto 1fr auto;height:100vh}
 #log{overflow:auto;padding:8px}.m{margin:6px 0;padding:6px;border-left:3px solid #888;background:#f4f4f4;white-space:pre-wrap}
 .h{border-color:#27c}.seen{font-size:11px;color:#666}aside{border-left:1px solid #ccc;padding:8px;overflow:auto}
-form{grid-column:1/3;display:flex;gap:4px;padding:6px;border-top:1px solid #ccc}input{flex:1}
-#setup{grid-column:1/3;padding:8px;background:#ffd}
+form#f{grid-column:1/3;display:flex;gap:4px;padding:6px;border-top:1px solid #ccc}input,select{flex:1}
+#setup{grid-column:1/3;padding:8px;background:#ffd;max-height:55vh;overflow:auto}
+#setup section{margin:4px 0 10px}#setup h4{margin:0 0 4px}#setup label{display:inline-block;margin-right:6px}
+#setup input,#setup select{flex:none}pre{background:#fff;border:1px solid #cc9;padding:6px;white-space:pre-wrap;word-break:break-all;margin:4px 0}
+.warn{color:#a40}
 </style>
 <div id="setup">
- Nuova stanza (topic): <input id="topic" style="flex:none;width:260px"> <button id="create">Crea</button>
- <pre id="out"></pre>
+ <section id="create-sec">
+  <h4>1. Nuova stanza (chi la crea vede il transcript qui sotto)</h4>
+  Topic: <input id="topic" style="width:260px"> <button id="create">Crea stanza</button>
+  <div id="invite" hidden>
+   Link di invito (passalo a chi entra): <pre id="invitelink"></pre>
+   <button id="copyinvite">Copia link</button>
+   <div class="warn">Il link porta roomId e inviteSecret nel frammento (#), che non viene inviato al server. Non incollarlo in chat pubbliche.</div>
+  </div>
+ </section>
+ <section id="join-sec">
+  <h4>2. Entra con il tuo agente (ogni partecipante, anche chi ha creato la stanza)</h4>
+  <label>roomId <input id="j-room" size="14"></label>
+  <label>inviteSecret <input id="j-inv" size="34"></label><br>
+  <label>nome <input id="j-name" value="agent" size="14"></label>
+  <label>host <select id="j-vendor"><option>claude-code</option><option>codex</option><option>opencode</option><option>hermes</option><option>other</option></select></label>
+  <button id="join">Entra e genera snippet</button>
+  <div id="join-err" class="warn"></div>
+  <div id="snip" hidden>
+   <div class="warn">Snippet NON testati su host reali. Il token e' un segreto: non condividerlo.</div>
+   <div><b>Claude Code - PowerShell</b><pre id="s-cc-ps"></pre><button data-c="s-cc-ps">Copia</button></div>
+   <div><b>Claude Code - bash</b><pre id="s-cc"></pre><button data-c="s-cc">Copia</button></div>
+   <div><b>Codex - PowerShell (variabile) + config.toml</b><pre id="s-cx-ps"></pre><button data-c="s-cx-ps">Copia</button>
+    <pre id="s-cx"></pre><button data-c="s-cx">Copia</button></div>
+   <div><b>Fallback: URL con token nel path</b><pre id="s-path"></pre><button data-c="s-path">Copia</button></div>
+   <div id="s-note"></div>
+  </div>
+ </section>
 </div>
 <div id="log"></div><aside><b>Partecipanti</b><div id="pl"></div></aside>
-<form id="f"><input id="name" value="human" style="flex:none;width:90px"><input id="txt" placeholder="messaggio (@nome per menzionare)" autocomplete="off"><button>Invia</button></form>
+<form id="f" hidden><input id="name" value="human" style="flex:none;width:90px"><input id="txt" placeholder="messaggio (@nome per menzionare)" autocomplete="off"><button>Invia</button></form>
 <script>
 const $=id=>document.getElementById(id), hh=t=>new Date(t).toTimeString().slice(0,5);
 const esc=s=>String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
@@ -32,12 +60,28 @@ function connect(room,admin){
   else if(d.type==='participants')plist(d.list)
   else if(d.type==='seen'){d.ids.forEach(i=>{(seen[i]??={})[d.agent]=d.at;msgs[i]&&show(msgs[i])});}};
  $('f').onsubmit=e=>{e.preventDefault();if($('txt').value){ws.send(JSON.stringify({type:'send',name:$('name').value,content:$('txt').value}));$('txt').value=''}};
- $('setup').hidden=true}
+ $('f').hidden=false; $('create-sec').querySelector('button#create').disabled=true}
 function plist(l){$('pl').innerHTML=l.map(p=>`<div>${esc(p.name)} <small>${esc(p.vendor)}${p.left?' (left)':''}${p.lastPoll?' poll '+hh(p.lastPoll):''}</small></div>`).join('')}
+async function copy(id,btn){try{await navigator.clipboard.writeText($(id).textContent);const t=btn.textContent;btn.textContent='Copiato';setTimeout(()=>btn.textContent=t,1200)}catch{const r=document.createRange();r.selectNodeContents($(id));getSelection().removeAllRanges();getSelection().addRange(r)}}
+document.querySelectorAll('button[data-c]').forEach(b=>b.onclick=()=>copy(b.dataset.c,b));
+$('copyinvite').onclick=e=>copy('invitelink',e.target);
 $('create').onclick=async()=>{
  const r=await (await fetch('/rooms',{method:'POST',body:JSON.stringify({topic:$('topic').value})})).json();
  location.hash=`room=${r.roomId}&admin=${r.adminSecret}`; // ponytail: admin secret in hash so refresh keeps the room
- $('out').textContent=`Invite (passa a chi entra): roomId=${r.roomId} inviteSecret=${r.inviteSecret}\nPOST ${location.origin}/rooms/${r.roomId}/join {"inviteSecret","displayName","vendor"}`;
+ $('invitelink').textContent=`${location.origin}/#join=${r.roomId}.${r.inviteSecret}`; $('invite').hidden=false;
+ $('j-room').value=r.roomId; $('j-inv').value=r.inviteSecret;
  connect(r.roomId,r.adminSecret)};
-const h=new URLSearchParams(location.hash.slice(1)); if(h.get('room'))connect(h.get('room'),h.get('admin'));
+$('join').onclick=async()=>{
+ $('join-err').textContent=''; $('snip').hidden=true;
+ const room=$('j-room').value.trim(), body={inviteSecret:$('j-inv').value.trim(),displayName:$('j-name').value.trim(),vendor:$('j-vendor').value};
+ let res; try{res=await fetch(`/rooms/${encodeURIComponent(room)}/join`,{method:'POST',body:JSON.stringify(body)})}catch(e){$('join-err').textContent='Errore di rete: '+e.message;return}
+ const d=await res.json().catch(()=>({}));
+ if(!res.ok){$('join-err').textContent=`Join rifiutato (${res.status}): ${d.error||'errore'}`;return}
+ const s=d.snippets;
+ $('s-cc').textContent=s.claudeCode; $('s-cc-ps').textContent=s.claudeCodePowerShell;
+ $('s-cx-ps').textContent=s.codexPowerShell; $('s-cx').textContent=s.codexConfigToml; $('s-path').textContent=s.pathFallbackUrl;
+ $('s-note').textContent=`Entrato come ${d.displayName} (${d.vendor}). ${d.note}`; $('snip').hidden=false};
+const h=new URLSearchParams(location.hash.slice(1));
+if(h.get('room'))connect(h.get('room'),h.get('admin'));
+else if(h.get('join')){const [r,i]=h.get('join').split('.');$('j-room').value=r||'';$('j-inv').value=i||'';$('create-sec').hidden=true}
 </script>

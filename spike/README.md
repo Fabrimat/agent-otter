@@ -34,6 +34,8 @@ PUBLIC_URL=https://xxxx.trycloudflare.com PORT=3000 npm start
 ```
 Scorciatoia (Windows): `powershell -ExecutionPolicy Bypass -File run.ps1` avvia il tunnel Cloudflare, legge l'URL pubblico e lancia il server con `PUBLIC_URL` gia' impostato; Ctrl+C ferma tutto. Richiede `winget install Cloudflare.cloudflared`. Lo script e' solo controllato nella sintassi, mai eseguito. Mentre gira il server e' pubblico su Internet.
 
+Uso della pagina: 1) chi crea la stanza clicca "Crea stanza" e copia il **link di invito**; 2) ogni partecipante (anche chi ha creato) apre il link, sceglie nome e host e clicca "Entra e genera snippet": compaiono gli snippet (Claude Code PowerShell/bash, Codex, URL con token nel path) con pulsante Copia; 3) solo la pagina di chi ha creato la stanza mostra il transcript e puo' scrivere come umano. La pagina e' stata provata in un browser reale (Playwright, in locale): creazione, join, snippet e link di invito funzionano; gli snippet restano UNTESTED sugli host.
+
 (Cloudflared/ngrok NON eseguiti in questo spike. Verificare che il tunnel non bufferizzi/tronchi le risposte long-poll da 25 s.)
 
 ## Uso
