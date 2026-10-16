@@ -65,7 +65,7 @@ Phases
 | Layer | Choice | Notes |
 |---|---|---|
 | Language | TypeScript, strict | |
-| Server | Fastify, modules as folders (`auth`, `rooms`, `messaging`, `mcp`, `audit`) | Nest is dropped from phase 1: not needed. Revisit only if the team wants it. First check that the current MCP SDK serves Fastify (raw req/res or adapter) in the spike |
+| Server | Fastify, modules as folders (`auth`, `rooms`, `messaging`, `mcp`, `audit`) | Nest is dropped from phase 1: not needed. Revisit only if the team wants it. Spike result: the SDK's `toNodeHandler` runs on plain `node:http`; with Fastify the MCP route would need `reply.hijack()` or a mounted Node handler **[UNVERIFIED]**, so Fastify is only worth keeping if its REST/WebSocket/rate-limit plugins pay for that |
 | Agent endpoint | MCP over Streamable HTTP, **stateless**, official TS SDK | Spec revision 2026-07-28: no `initialize`, no session id, no SSE resumability **[UNVERIFIED in the SDK: check v2 packages and legacy-client support]** |
 | Browser realtime | WebSocket | One socket per tab, resume from last `seq` |
 | Hot state (anonymous) | In-process memory | Rooms, members, recent messages, rate limits. Lost on restart by design |
@@ -241,7 +241,7 @@ Each agent connection has `deliveryMode: 'pull' | 'push'` (shown in the UI).
 - **Shim as universal adapter (decided by the spike gate):** `npx <name> connect <token>` = local stdio MCP server speaking WebSocket to the backend. It removes the token from URLs and configs, removes Streamable HTTP variance between hosts, and is push-ready. If the spike shows pull is unusable, the shim becomes phase 1. Remote HTTP stays as the zero-install baseline.
 - **Inbound policy (owned by the agent's owner):** who may wake my agent (`mentions_only` default; `own_owner_only`; `anyone`), max wakes per hour, daily wake budget, digest batching (at most one wake per N seconds). A room admin cannot override it.
 
-Per-host onboarding snippets (verified formats **[UNVERIFIED until tested]**): Claude Code `claude mcp add -t http -H "Authorization: Bearer ..."` or `.mcp.json` with `type: http`; Codex `config.toml` with `url` and `bearer_token_env_var`; OpenCode `opencode.json` with `type: remote` and `headers`; Hermes `config.yaml` under `mcp_servers` (`hermes mcp add` exists, but only `--preset` is documented). Do not ship a snippet that has not been run on a real install. The snippet text includes a plain warning about running in permission-bypass modes with strangers.
+Per-host onboarding snippets (verified formats **[UNVERIFIED until tested]**): Claude Code `claude mcp add --transport http <name> <url> --header "Authorization: Bearer ..."` (name and URL before `--header`, which is variadic) or `.mcp.json` with `type: http`; Codex `config.toml` with `url` and `bearer_token_env_var`; OpenCode `opencode.json` with `type: remote` and `headers`; Hermes `config.yaml` under `mcp_servers` (`hermes mcp add` exists, but only `--preset` is documented). Do not ship a snippet that has not been run on a real install. The snippet text includes a plain warning about running in permission-bypass modes with strangers.
 
 ## 10. Security requirements (summary; details and rationale in `docs/THREAT-MODEL.md`)
 
@@ -298,6 +298,8 @@ Not legal advice; have a lawyer review before the public launch.
 ### Phase 0: spike (1 day)
 - `spike/`: stateless MCP server in memory with `room_send`, `room_inbox`, `room_participants`, `room_leave`, a browser page, Claude Code and Codex connected from two machines.
 - Acceptance: the manual protocol in `spike/README.md` is run and its results table filled in. **Gate:** if pull is usable (humans can drive a useful exchange without constant nudging, or looping `room_inbox` is stable), proceed with remote HTTP; otherwise the shim moves into phase 1.
+- **Result (2026-10-16): pull judged usable** by the product owner after a two-machine run with Claude Code and Codex through a Cloudflare quick tunnel. Decision: **remote HTTP is the phase 1 baseline; the shim is deferred to phase 2.** The detailed results table in `spike/README.md` was not filled in; the assessment is the owner's, so treat the metrics as unmeasured and re-test when hosts change.
+- **Spike findings that change the plan:** (1) the MCP SDK's `toNodeHandler` works on plain `node:http`; Fastify is not required for the MCP route. (2) `claude mcp add -H/--header` is variadic and swallows the following positional arguments, so name and URL must come first: `claude mcp add --transport http <name> <url> --header "Authorization: Bearer ..."`. (3) Humans must keep the creator's page (admin link) open to see the transcript; participants need a read-only link in phase 1a. (4) Agents are not woken: expected in pull mode.
 
 ### Phase 1a
 - Anonymous rooms with TTL, invite, `MemoryStore`, MCP tools above (no `room_history` beyond the ring), browser transcript with receipts, one host adapter tested for real, sanitisation and delivery wrapping, rate limits, kill switch.

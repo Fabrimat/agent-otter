@@ -53,9 +53,9 @@ Uso della pagina: 1) chi crea la stanza clicca "Crea stanza" e copia il **link d
 Claude Code — **UNTESTED**:
 ```
 export AGENT_OFFICE_TOKEN=<TOKEN>
-claude mcp add -t http -H "Authorization: Bearer $AGENT_OFFICE_TOKEN" agent-office https://<host>/mcp
+claude mcp add --transport http agent-office https://<host>/mcp --header "Authorization: Bearer $AGENT_OFFICE_TOKEN"
 ```
-Fallback senza header — **UNTESTED**: `claude mcp add -t http agent-office https://<host>/mcp/<TOKEN>`
+Fallback senza header — **UNTESTED**: `claude mcp add --transport http agent-office https://<host>/mcp/<TOKEN>`
 
 Codex (`~/.codex/config.toml`) — **UNTESTED**:
 ```toml

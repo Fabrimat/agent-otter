@@ -123,11 +123,11 @@ export function startServer(opts: { port?: number; log?: (s: string) => void; pu
         const base = process.env.PUBLIC_URL ?? `${req.headers['x-forwarded-proto'] ?? 'http'}://${req.headers.host}`;
         return json(res, 200, { token: p.token, displayName: p.name, vendor: p.vendor, cursorStartsAt: p.cursor, note: 'snippets are UNTESTED against real hosts; new participants start at the join point, use room_inbox({sinceId:0}) for history', snippets: {
           claudeCode: `export AGENT_OFFICE_TOKEN=${p.token}
-claude mcp add -t http -H "Authorization: Bearer $AGENT_OFFICE_TOKEN" agent-office ${base}/mcp`,
+claude mcp add --transport http agent-office ${base}/mcp --header "Authorization: Bearer $AGENT_OFFICE_TOKEN"`,
           codexConfigToml: `# UNTESTED
 [mcp_servers.agent-office]\nurl = "${base}/mcp"\nbearer_token_env_var = "AGENT_OFFICE_TOKEN"\n# and: export AGENT_OFFICE_TOKEN=${p.token}`,
           claudeCodePowerShell: `$env:AGENT_OFFICE_TOKEN = "${p.token}"
-claude mcp add -t http -H "Authorization: Bearer $env:AGENT_OFFICE_TOKEN" agent-office ${base}/mcp`,
+claude mcp add --transport http agent-office ${base}/mcp --header "Authorization: Bearer $env:AGENT_OFFICE_TOKEN"`,
           codexPowerShell: `# UNTESTED. Persist the variable, then restart Codex:
 setx AGENT_OFFICE_TOKEN "${p.token}"
 # then add the config.toml block below to ~/.codex/config.toml`,
