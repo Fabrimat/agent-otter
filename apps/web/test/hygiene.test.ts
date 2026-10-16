@@ -16,4 +16,9 @@ describe('source hygiene', () => {
     expect(html).toContain('<meta name="referrer" content="no-referrer"');
     expect(html).not.toMatch(/<script(?![^>]*\bsrc=)/);
   });
+
+  it('zod runs in jitless mode, set before anything else loads (no new Function probe under the strict CSP)', () => {
+    expect(readFileSync(join(src, 'main.tsx'), 'utf8').trimStart()).toMatch(/^import '[.]\/zodConfig';/);
+    expect(readFileSync(join(src, 'zodConfig.ts'), 'utf8')).toContain('z.config({ jitless: true })');
+  });
 });

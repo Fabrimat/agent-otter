@@ -6,6 +6,8 @@
   "scripts": {
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",
-    "build": "pnpm -r build"
+    "build": "pnpm -r build",
+    "test:e2e": "pnpm --filter @agent-office/e2e e2e",
+    "test:hosts": "pnpm --filter @agent-office/e2e-hosts hosts"
   }
 }

@@ -3,7 +3,7 @@
 import { createHash, timingSafeEqual } from 'node:crypto';
 import {
   type AdminAction, type CreateRoomResponse, type ParticipantInfo, type RoomPublicInfo, type Rng, type StoredMessage, type Vendor,
-  LIMITS, isReservedName, sanitizeIdent, sanitizeText, skeleton,
+  LIMITS, detectSecrets, isReservedName, sanitizeIdent, sanitizeText, skeleton,
 } from '@agent-office/protocol';
 import { StoreError } from './errors.js';
 import { SlidingWindow } from './ratelimit.js';
@@ -42,7 +42,7 @@ export interface RoomStore {
   participants(roomId: string): Promise<ParticipantInfo[]>;
   leave(roomId: string, participantId: string): Promise<void>;
   admin(roomId: string, action: AdminAction): Promise<void>;
-  issueTicket(roomId: string, role: 'admin' | 'viewer'): Promise<{ ticket: string; role: 'admin' | 'viewer'; expiresInSeconds: number }>;
+  issueTicket(roomId: string, role: 'admin' | 'viewer', ip?: string): Promise<{ ticket: string; role: 'admin' | 'viewer'; expiresInSeconds: number }>;
   redeemTicket(ticket: string): Promise<{ roomId: string; role: 'admin' | 'viewer' } | undefined>;
   subscribe(roomId: string, fn: (e: RoomEvent) => void): () => void;
   sweep(): Promise<void>;
@@ -56,14 +56,21 @@ export type MemoryStoreOptions = {
   maxHumans?: number;
   ringSize?: number;
   messagesPerMinute?: number;
+  ttlMs?: number;
+  ringBytes?: number;
+  maxTotalBytes?: number;
+  maxWaitsPerParticipant?: number;
+  maxTicketsPerRoom?: number;
+  maxTicketsPerIp?: number;
 };
 
 type Member = {
   id: string; ownerId: string; displayName: string; kind: 'agent' | 'human'; vendor?: Vendor; tokenHash?: string;
   cursor: number; joinSeq: number; left: boolean; conns: number; lastSeen: number | null; sent: Map<string, { seq: number; id: string }>;
+  waits: Set<() => void>; // resolvers of this participant's open long-polls, oldest first
 };
 type Room = {
-  id: string; topic: string; secrets: Record<Role, string>; adminOwnerId: string; expiresAt: number; seq: number; ring: StoredMessage[];
+  id: string; topic: string; secrets: Record<Role, string>; adminOwnerId: string; expiresAt: number; seq: number; ring: StoredMessage[]; bytes: number;
   members: Map<string, Member>; paused: boolean; closed: boolean; closingSent: boolean; listeners: Set<(e: RoomEvent) => void>; limiter: SlidingWindow;
 };
 
@@ -74,18 +81,29 @@ const CLOSING_WARNING_MS = 60_000;
 // so a room that churns through 200 distinct agent names is full. The admin human is one stable member, so reconnects never grow the map.
 const MAX_MEMBERS = 200;
 const MAX_TICKETS = 10_000;
+// Memory math. A stored message costs its content bytes plus MSG_OVERHEAD (object, ids, strings, mentions; rounded up).
+// Per room: ringBytes (2 MB) bounds the ring, oldest dropped first (a 16 KB message means at least 128 stay).
+// Global: maxTotalBytes (256 MB) bounds the sum over all rooms and REJECTS sends (rate_limited) instead of evicting other rooms' history.
+// Worst case 1000 rooms x 2 MB = 2 GB would exceed it, so the global budget is the binding limit; accounted bytes are only PART of the heap: strings,
+// objects, listeners, tokens, tickets and the runtime come on top, and V8 does not GC before a cgroup OOM-kill. 256 MB accounted is sized for
+// roughly a 768 MB container; raise MAX_TOTAL_BYTES only together with the memory limit.
+const MSG_OVERHEAD = 256;
+const cost = (m: StoredMessage) => Buffer.byteLength(m.content ?? '') + MSG_OVERHEAD;
 
 const sha = (s: string) => createHash('sha256').update(s).digest();
-const sameSecret = (a: string, b: string) => timingSafeEqual(sha(a), sha(b));
+export const sameSecret = (a: string, b: string) => timingSafeEqual(sha(a), sha(b));
 const defaultRng: Rng = (n) => crypto.getRandomValues(new Uint8Array(n));
 
 export class MemoryStore implements RoomStore {
   private rooms = new Map<string, Room>();
   private tokens = new Map<string, { roomId: string; participantId: string }>(); // sha256(token) hex -> owner
-  private tickets = new Map<string, { roomId: string; role: 'admin' | 'viewer'; exp: number }>();
+  private tickets = new Map<string, { roomId: string; role: 'admin' | 'viewer'; ip: string; exp: number }>();
   private now: () => number;
   private rng: Rng;
   private o: Required<Omit<MemoryStoreOptions, 'now' | 'rng'>>;
+  private totalBytes = 0;
+  private ticketsByRoom = new Map<string, number>();
+  private ticketsByIp = new Map<string, number>();
 
   constructor(o: MemoryStoreOptions = {}) {
     this.now = o.now ?? Date.now;
@@ -93,6 +111,8 @@ export class MemoryStore implements RoomStore {
     this.o = {
       maxRooms: o.maxRooms ?? 1000, maxAgents: o.maxAgents ?? LIMITS.agentsPerRoom, maxHumans: o.maxHumans ?? LIMITS.humansPerRoom,
       ringSize: o.ringSize ?? LIMITS.ringSize, messagesPerMinute: o.messagesPerMinute ?? LIMITS.messagesPerMinutePerRoom,
+      ttlMs: Math.min(o.ttlMs ?? LIMITS.roomTtlMs, LIMITS.roomTtlMs), ringBytes: o.ringBytes ?? 2 * 1024 * 1024, maxTotalBytes: o.maxTotalBytes ?? 256 * 1024 * 1024,
+      maxWaitsPerParticipant: o.maxWaitsPerParticipant ?? 2, maxTicketsPerRoom: o.maxTicketsPerRoom ?? 50, maxTicketsPerIp: o.maxTicketsPerIp ?? 20,
     };
   }
 
@@ -129,7 +149,7 @@ export class MemoryStore implements RoomStore {
   private newMember(r: Room, kind: 'agent' | 'human', displayName: string, ownerId: string, vendor?: Vendor): Member {
     const active = [...r.members.values()].filter((m) => !m.left && m.kind === kind).length;
     if (r.members.size >= MAX_MEMBERS || active >= (kind === 'agent' ? this.o.maxAgents : this.o.maxHumans)) throw new StoreError('room_full', `room is full (max ${kind === 'agent' ? this.o.maxAgents : this.o.maxHumans} ${kind}s)`);
-    const m: Member = { id: 'p_' + this.hex(6), ownerId, displayName, kind, vendor, cursor: r.seq, joinSeq: r.seq, left: false, conns: 0, lastSeen: null, sent: new Map() };
+    const m: Member = { id: 'p_' + this.hex(6), ownerId, displayName, kind, vendor, cursor: r.seq, joinSeq: r.seq, left: false, conns: 0, lastSeen: null, sent: new Map(), waits: new Set() };
     r.members.set(m.id, m);
     return m;
   }
@@ -144,6 +164,8 @@ export class MemoryStore implements RoomStore {
     this.emit(r, { type: 'closed', reason });
     for (const m of r.members.values()) { m.left = true; this.revoke(m); }
     r.listeners.clear();
+    this.totalBytes -= r.bytes;
+    r.bytes = 0;
     r.ring = [];
   }
 
@@ -152,9 +174,9 @@ export class MemoryStore implements RoomStore {
     let id = this.hex(6);
     while (this.rooms.has(id)) id = this.hex(6);
     const secrets = { invite: this.hex(16), view: this.hex(16), admin: this.hex(16) };
-    const expiresAt = this.now() + LIMITS.roomTtlMs; // hard cap, never refreshed
+    const expiresAt = this.now() + this.o.ttlMs; // hard cap (ttlMs <= 1 h), never refreshed
     this.rooms.set(id, {
-      id, topic: sanitizeText(topic), secrets, adminOwnerId: 'o_' + this.hex(8), expiresAt, seq: 0, ring: [], members: new Map(), paused: false, closed: false,
+      id, topic: sanitizeText(topic), secrets, adminOwnerId: 'o_' + this.hex(8), expiresAt, seq: 0, ring: [], bytes: 0, members: new Map(), paused: false, closed: false,
       closingSent: false, listeners: new Set(), limiter: new SlidingWindow(this.o.messagesPerMinute, 60_000, this.now),
     });
     return { roomId: id, inviteSecret: secrets.invite, adminSecret: secrets.admin, viewSecret: secrets.view, expiresAt };
@@ -211,6 +233,9 @@ export class MemoryStore implements RoomStore {
   }
 
   async send(roomId: string, participantId: string, input: { content: string; replyTo?: string; clientMsgId?: string }) {
+    // the one choke point: no caller (MCP, WS, future REST) can skip the secret scan
+    const kinds = detectSecrets(input.content);
+    if (kinds.length) throw new StoreError('secret_detected', `not sent, the message looks like it contains a secret (${kinds.join(', ')}). Remove it and send again.`);
     const r = this.open(roomId);
     if (r.paused) throw new StoreError('room_paused', 'room is paused by the admin');
     const m = r.members.get(participantId);
@@ -220,6 +245,8 @@ export class MemoryStore implements RoomStore {
     const content = sanitizeText(input.content, true);
     if (!content) throw new StoreError('bad_request', 'message is empty');
     if (!r.limiter.hit('room')) throw new StoreError('rate_limited', `room message limit reached (${this.o.messagesPerMinute} per minute)`);
+    const size = Buffer.byteLength(content) + MSG_OVERHEAD;
+    if (this.totalBytes + size > this.o.maxTotalBytes) throw new StoreError('rate_limited', 'server memory budget reached, messages are rejected until rooms expire');
     const mentions = [...new Set([...content.matchAll(/@([\p{L}\p{N}_.-]+)/gu)].flatMap((x) => {
       const k = skeleton((x[1] ?? '').replace(/[.-]+$/, ''));
       const hit = [...r.members.values()].find((q) => !q.left && skeleton(q.displayName) === k);
@@ -232,7 +259,13 @@ export class MemoryStore implements RoomStore {
       content, mentions, ...(replyTo && { replyTo }), hops: 0,
     };
     r.ring.push(message);
-    if (r.ring.length > this.o.ringSize) r.ring.shift();
+    r.bytes += size;
+    this.totalBytes += size;
+    while (r.ring.length > 1 && (r.ring.length > this.o.ringSize || r.bytes > this.o.ringBytes)) {
+      const old = cost(r.ring.shift()!);
+      r.bytes -= old;
+      this.totalBytes -= old;
+    }
     if (input.clientMsgId) {
       m.sent.set(input.clientMsgId, { seq: message.seq, id: message.id });
       if (m.sent.size > CLIENT_MSG_IDS) m.sent.delete(m.sent.keys().next().value as string);
@@ -270,10 +303,13 @@ export class MemoryStore implements RoomStore {
       if (!r || !m) return resolve();
       const ready = () => r.closed || m.left || this.pending(r, m, this.clamp(r, m, o.sinceSeq)).length > 0;
       if (ready() || o.waitMs <= 0 || o.signal?.aborted) return resolve();
-      const done = () => { clearTimeout(timer); r.listeners.delete(onEvent); o.signal?.removeEventListener('abort', done); resolve(); };
+      const done = () => { m.waits.delete(done); clearTimeout(timer); r.listeners.delete(onEvent); o.signal?.removeEventListener('abort', done); resolve(); };
       const onEvent = () => { if (ready()) done(); };
       const timer = setTimeout(done, o.waitMs);
       r.listeners.add(onEvent);
+      // cap: a new wait resolves the oldest one early (it returns with whatever is pending, normally nothing)
+      while (m.waits.size >= this.o.maxWaitsPerParticipant) m.waits.values().next().value!();
+      m.waits.add(done);
       o.signal?.addEventListener('abort', done, { once: true });
     });
   }
@@ -326,17 +362,31 @@ export class MemoryStore implements RoomStore {
     }
   }
 
-  async issueTicket(roomId: string, role: 'admin' | 'viewer') {
+  async issueTicket(roomId: string, role: 'admin' | 'viewer', ip = '') {
     this.open(roomId);
-    if (this.tickets.size >= MAX_TICKETS) throw new StoreError('rate_limited', 'too many pending tickets');
+    if (this.tickets.size >= MAX_TICKETS || (this.ticketsByRoom.get(roomId) ?? 0) >= this.o.maxTicketsPerRoom || (ip && (this.ticketsByIp.get(ip) ?? 0) >= this.o.maxTicketsPerIp)) {
+      throw new StoreError('rate_limited', 'too many pending tickets, try again in a moment');
+    }
     const ticket = this.hex(16);
-    this.tickets.set(ticket, { roomId, role, exp: this.now() + TICKET_TTL_S * 1000 });
+    this.tickets.set(ticket, { roomId, role, ip, exp: this.now() + TICKET_TTL_S * 1000 });
+    this.ticketsByRoom.set(roomId, (this.ticketsByRoom.get(roomId) ?? 0) + 1);
+    if (ip) this.ticketsByIp.set(ip, (this.ticketsByIp.get(ip) ?? 0) + 1);
     return { ticket, role, expiresInSeconds: TICKET_TTL_S };
+  }
+
+  private dropTicket(ticket: string) {
+    const t = this.tickets.get(ticket);
+    if (!t) return;
+    this.tickets.delete(ticket);
+    for (const [map, key] of [[this.ticketsByRoom, t.roomId], [this.ticketsByIp, t.ip]] as const) {
+      const n = (map.get(key) ?? 1) - 1;
+      if (n > 0) map.set(key, n); else map.delete(key);
+    }
   }
 
   async redeemTicket(ticket: string) {
     const t = this.tickets.get(ticket);
-    this.tickets.delete(ticket); // one use, even if expired
+    this.dropTicket(ticket); // one use, even if expired
     return t && t.exp > this.now() && this.live(t.roomId) && !this.rooms.get(t.roomId)!.closed ? { roomId: t.roomId, role: t.role } : undefined;
   }
 
@@ -357,6 +407,6 @@ export class MemoryStore implements RoomStore {
         this.emit(r, { type: 'closing', expiresAt: r.expiresAt });
       }
     }
-    for (const [k, v] of this.tickets) if (v.exp <= t) this.tickets.delete(k);
+    for (const [k, v] of this.tickets) if (v.exp <= t) this.dropTicket(k);
   }
 }

@@ -10,6 +10,7 @@ export default defineConfig({
   server: {
     proxy: {
       '/rooms': target,
+      '/api': target,
       '/mcp': target,
       '/ws': { target, ws: true },
     },

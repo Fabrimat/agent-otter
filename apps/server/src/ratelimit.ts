@@ -6,6 +6,12 @@ export class SlidingWindow {
 
   get size() { return this.hits.size; }
 
+  /** True when the key is at its limit right now. Records nothing. */
+  full(key: string): boolean {
+    const t = this.now();
+    return (this.hits.get(key) ?? []).filter((x) => x > t - this.windowMs).length >= this.limit;
+  }
+
   /** Records an attempt; false when the key is over the limit (the attempt is not counted then). */
   hit(key: string): boolean {
     const t = this.now();

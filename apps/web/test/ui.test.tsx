@@ -76,7 +76,7 @@ describe('join page', () => {
 describe('home', () => {
   it('creates a room, stores secrets locally and goes to /r without secrets in the URL', async () => {
     const created = { roomId: ROOM, inviteSecret: SEC, adminSecret: 'f'.repeat(32), viewSecret: 'e'.repeat(32), expiresAt: Date.now() + 3600_000 };
-    const fetchMock = vi.fn(async () => json(created));
+    const fetchMock = vi.fn(async (url: string) => (url === '/api/config' ? json({ createRequiresKey: false, createEnabled: true, ttlSeconds: 3600 }) : json(created)));
     vi.stubGlobal('fetch', fetchMock);
     class FakeWS { static OPEN = 1; readyState = 0; close() {} send() {} }
     vi.stubGlobal('WebSocket', FakeWS);
@@ -84,8 +84,37 @@ describe('home', () => {
     await userEvent.type(screen.getByLabelText(/Topic/), 'hi');
     await userEvent.click(screen.getByRole('button', { name: 'Create room' }));
     await waitFor(() => expect(loadRoom(ROOM)?.adminSecret).toBe('f'.repeat(32)));
-    expect(JSON.parse((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body as string)).toEqual({ topic: 'hi' });
+    const post = fetchMock.mock.calls.find(([u]) => u === '/rooms/anonymous') as unknown as [string, RequestInit];
+    expect(JSON.parse(post[1].body as string)).toEqual({ topic: 'hi' });
+    expect(post[1].headers).not.toHaveProperty('x-create-key');
     expect(await screen.findByText(/Your room/)).toBeInTheDocument();
+  });
+});
+
+describe('home access gate', () => {
+  const cfg = (o: object) => ({ createRequiresKey: false, createEnabled: true, ttlSeconds: 3600, ...o });
+  afterEach(() => sessionStorage.clear());
+
+  it('asks for the key, sends it as x-create-key, keeps it in sessionStorage only, explains create_forbidden', async () => {
+    const fetchMock = vi.fn(async (url: string) =>
+      url === '/api/config' ? json(cfg({ createRequiresKey: true })) : json({ error: 'nope', code: 'create_forbidden' }, 403));
+    vi.stubGlobal('fetch', fetchMock);
+    renderAt('/');
+    await userEvent.type(await screen.findByLabelText('Access key'), 'k3y');
+    await userEvent.click(screen.getByRole('button', { name: 'Create room' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('access key is missing or wrong');
+    const post = fetchMock.mock.calls.find(([u]) => u === '/rooms/anonymous') as unknown as [string, RequestInit];
+    expect(post[1].headers).toMatchObject({ 'x-create-key': 'k3y' });
+    expect(sessionStorage.getItem('ao:createKey')).toBe('k3y');
+    expect(localStorage.length).toBe(0);
+  });
+
+  it('no key field when not required; disabled creation is explained and blocks the button', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => json(cfg({ createEnabled: false }))));
+    renderAt('/');
+    expect(await screen.findByRole('alert')).toHaveTextContent('Room creation is turned off');
+    expect(screen.queryByLabelText('Access key')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Create room' })).toBeDisabled();
   });
 });
 

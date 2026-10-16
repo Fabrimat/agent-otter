@@ -1,0 +1,73 @@
+# Run from anywhere:  docker compose -f docker/compose.yml --env-file docker/.env up -d --build
+# (or cd docker && cp .env.example .env && docker compose up -d --build)
+# Temporary sharing without a domain:  docker compose --profile tunnel up -d
+services:
+  agent-office:
+    build:
+      context: ..
+    image: agent-office:local
+    restart: unless-stopped
+    # loopback only: put a TLS reverse proxy (Caddy/nginx) in front, see docs/INTERNAL-USE.md
+    ports:
+      - "127.0.0.1:${HOST_PORT:-3000}:3000"
+    environment:
+      HOST: "0.0.0.0" # inside the container only; the host port mapping above stays on 127.0.0.1
+      PORT: "3000"
+      # Public origin users see (join snippets + allowed WebSocket Origin)
+      PUBLIC_URL: ${PUBLIC_URL:-http://localhost:3000}
+      # Required by default for internal deployments: room creation needs header x-create-key
+      CREATE_KEY: ${CREATE_KEY:?set a long random key}
+      # "true" only behind a proxy that sets X-Forwarded-For (last entry is used)
+      TRUST_PROXY: ${TRUST_PROXY:-false}
+      # Room lifetime, 5..3600 (hard 1 h cap, activity never extends it)
+      ROOM_TTL_SECONDS: ${ROOM_TTL_SECONDS:-3600}
+      # Global budget for stored message bytes (default 256 MB). Accounted bytes are only part
+      # of the heap (strings, sockets, V8 overhead), hence mem_limit below stays at least 768m.
+      MAX_TOTAL_BYTES: ${MAX_TOTAL_BYTES:-268435456}
+      # Room creations per IP per hour (1..10000). Only matters without CREATE_KEY
+      # (holders of a valid key skip it).
+      ROOMS_PER_IP_PER_HOUR: ${ROOMS_PER_IP_PER_HOUR:-5}
+      MAX_ROOMS: ${MAX_ROOMS:-1000}
+      MCP_CALLS_PER_MINUTE: ${MCP_CALLS_PER_MINUTE:-120}
+      # "false" = kill switch for creation (needs a restart to flip)
+      CREATE_ROOMS: ${CREATE_ROOMS:-true}
+      # Logs never contain tokens, secrets or content
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 768m # keep >= 768m even if MAX_TOTAL_BYTES is lowered
+    pids_limit: 256
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:3000/healthz || exit 1"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+  # Optional: temporary public URL through a Cloudflare quick tunnel.
+  #   docker compose --profile tunnel up -d
+  #   docker compose logs tunnel | grep trycloudflare.com    <- the https URL appears here
+  # Then set PUBLIC_URL to that URL and TRUST_PROXY=true, and recreate agent-office
+  # (rooms are lost on restart). The URL changes at every start. Do not use for permanent hosting.
+  tunnel:
+    profiles: ["tunnel"]
+    # pinned; tag 2026.10.1 exists on Docker Hub (checked), update deliberately.
+    # NOTE: this read_only/cap_drop combination for cloudflared was NOT tested
+    # (the earlier spike launched it differently).
+    image: cloudflare/cloudflared:2026.10.1
+    restart: unless-stopped
+    command: tunnel --no-autoupdate --url http://agent-office:3000
+    depends_on:
+      agent-office:
+        condition: service_healthy
+    read_only: true
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true

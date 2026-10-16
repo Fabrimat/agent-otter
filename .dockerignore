@@ -1,0 +1,17 @@
+**/node_modules
+**/dist
+**/*.log
+.git
+.github
+.env
+**/.env
+.playwright-mcp
+spike
+docs
+e2e*/test-results
+e2e*/playwright-report
+**/coverage
+Dockerfile
+.dockerignore
+docker
+*.md

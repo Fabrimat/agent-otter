@@ -85,6 +85,7 @@ export type ParticipantInfo = z.infer<typeof ParticipantInfo>;
 export const ErrorCode = z.enum([
   'bad_request', 'bad_secret', 'room_not_found', 'room_closed', 'room_paused', 'rate_limited', 'secret_detected',
   'name_taken', 'reserved_name', 'payload_too_large', 'forbidden_role', 'bad_ticket', 'room_full', 'internal',
+  'create_forbidden', 'create_disabled', // additive: room-creation gate (wrong/missing key, creation switched off)
 ]);
 export type ErrorCode = z.infer<typeof ErrorCode>;
 

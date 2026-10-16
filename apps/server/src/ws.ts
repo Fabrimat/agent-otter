@@ -3,10 +3,10 @@ import type { Server } from 'node:http';
 import type { Duplex } from 'node:stream';
 import { randomUUID } from 'node:crypto';
 import { WebSocketServer, type RawData, type WebSocket } from 'ws';
-import { ClientCommand, LIMITS, WsQuery, detectSecrets, type ServerEvent } from '@agent-office/protocol';
+import { ClientCommand, LIMITS, WsQuery, type ServerEvent } from '@agent-office/protocol';
 import { toDelivered } from './deliver.js';
 import { StoreError } from './errors.js';
-import type { Logger } from './log.js';
+import { errKind, type Logger } from './log.js';
 import { SlidingWindow } from './ratelimit.js';
 import type { Identity, RoomEvent, RoomStore } from './store.js';
 
@@ -16,8 +16,17 @@ const MAX_BUFFERED = 1024 * 1024; // slow consumer: drop it rather than grow mem
 const INIT_MESSAGES = 200;
 const RESUME_MESSAGES = 500;
 
-export function attachWs(server: Server, d: { store: RoomStore; log: Logger; now: () => number }) {
+export function attachWs(server: Server, d: { store: RoomStore; log: Logger; now: () => number; publicUrl: string }) {
   const { store, log } = d;
+  const publicOrigin = new URL(d.publicUrl).origin;
+  // URL parsing lowercases and drops default ports from the Origin; the Host header gets the same treatment. Anything unparsable fails closed.
+  const originOk = (origin: string, host: string | undefined) => {
+    if (!URL.canParse(origin)) return false;
+    const o = new URL(origin);
+    if (o.origin === publicOrigin) return true;
+    const h = host?.toLowerCase().replace(o.protocol === 'https:' ? /:443$/ : /:80$/, '');
+    return !!h && o.host === h;
+  };
   const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_PAYLOAD });
   const perRoom = new Map<string, number>();
   const connLimiter = new SlidingWindow(20, 10_000, d.now); // commands per connection per 10 s
@@ -41,9 +50,9 @@ export function attachWs(server: Server, d: { store: RoomStore; log: Logger; now
     try {
       const url = new URL(req.url ?? '/', 'http://x');
       if (url.pathname !== '/ws') return refuse(socket, 404, 'Not Found');
-      // browsers always send Origin; it must match Host (blocks cross-site WebSocket hijacking)
+      // browsers always send Origin; it must match Host, or the origin of PUBLIC_URL when a proxy rewrites Host (blocks cross-site WebSocket hijacking)
       const origin = req.headers.origin;
-      if (origin !== undefined && !(URL.canParse(origin) && new URL(origin).host === req.headers.host)) {
+      if (origin !== undefined && !originOk(origin, req.headers.host)) {
         log.warn({ evt: 'ws_origin_rejected' });
         return refuse(socket, 403, 'Forbidden');
       }
@@ -53,7 +62,7 @@ export function attachWs(server: Server, d: { store: RoomStore; log: Logger; now
       if ((perRoom.get(t.roomId) ?? 0) >= MAX_SOCKETS_PER_ROOM) return refuse(socket, 503, 'Service Unavailable');
       wss.handleUpgrade(req, socket, head, (ws) => void connect(ws, t.roomId, t.role, q.data.lastSeq));
     } catch (e) {
-      log.error({ evt: 'internal', err: (e as Error).message, where: 'ws_upgrade' });
+      log.error({ evt: 'internal', err: errKind(e), where: 'ws_upgrade' });
       socket.destroy();
     }
   });
@@ -109,13 +118,13 @@ export function attachWs(server: Server, d: { store: RoomStore; log: Logger; now
       for (const e of queue.splice(0)) if (e.type !== 'message' || e.message.seq > page.lastSeq) forward(e);
     } catch (e) {
       const known = e instanceof StoreError;
-      if (!known) log.error({ evt: 'internal', err: (e as Error).message, where: 'ws_connect' });
+      if (!known) log.error({ evt: 'internal', err: errKind(e), where: 'ws_connect' });
       emit({ type: 'error', code: known ? e.code : 'internal', message: known ? e.message : 'internal error' });
       ws.close(1008, 'refused');
       return;
     }
 
-    ws.on('message', (raw: RawData, isBinary: boolean) => void onCommand(raw, isBinary).catch((e) => log.error({ evt: 'internal', err: (e as Error).message, where: 'ws_command' })));
+    ws.on('message', (raw: RawData, isBinary: boolean) => void onCommand(raw, isBinary).catch((e) => log.error({ evt: 'internal', err: errKind(e), where: 'ws_command' })));
     async function onCommand(raw: RawData, isBinary: boolean) {
       if (!connLimiter.hit(connId)) return emit({ type: 'error', code: 'rate_limited', message: 'too many commands, slow down' });
       let json: unknown;
@@ -123,19 +132,22 @@ export function attachWs(server: Server, d: { store: RoomStore; log: Logger; now
       const cmd = ClientCommand.safeParse(json);
       if (!cmd.success) return emit({ type: 'error', code: 'bad_request', message: 'invalid command' });
       if (role !== 'admin' || !me) return emit({ type: 'error', code: 'forbidden_role', message: 'viewers are read-only' });
-      const kinds = detectSecrets(cmd.data.content);
-      if (kinds.length) {
-        log.warn({ evt: 'secret_blocked', via: 'ws', roomId, participantId: me.participantId, kinds });
-        return emit({ type: 'error', code: 'secret_detected', message: `not sent, the message looks like it contains a secret (${kinds.join(', ')})` });
-      }
       try {
         await store.send(roomId, me.participantId, cmd.data);
       } catch (e) {
         if (!(e instanceof StoreError)) throw e;
+        if (e.code === 'secret_detected') log.warn({ evt: 'secret_blocked', via: 'ws', roomId, participantId: me.participantId });
         emit({ type: 'error', code: e.code, message: e.message });
       }
     }
   }
 
-  return { close: () => { clearInterval(heartbeat); for (const ws of wss.clients) ws.terminate(); wss.close(); } };
+  const close = () => { clearInterval(heartbeat); for (const ws of wss.clients) ws.terminate(); wss.close(); };
+  /** Graceful: a close frame (1001) to every client, then terminate whoever has not answered after 1 s. */
+  const shutdown = async () => {
+    const closed = [...wss.clients].map((ws) => new Promise<void>((ok) => { ws.once('close', () => ok()); ws.close(1001, 'server shutting down'); }));
+    await Promise.race([Promise.all(closed), new Promise((ok) => setTimeout(ok, 1000))]);
+    close();
+  };
+  return { close, shutdown };
 }

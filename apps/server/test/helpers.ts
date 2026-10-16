@@ -12,7 +12,8 @@ export async function boot(o: { cfg?: Partial<Config>; app?: Partial<AppOptions>
   const clock = { t: T0 };
   const logs: string[] = [];
   const log = createLogger('debug', { write: (s: string) => void logs.push(s) });
-  const cfg: Config = { port: 0, publicUrl: 'http://localhost:3000', trustProxy: false, maxRooms: 1000, logLevel: 'debug', ...o.cfg };
+  const cfg: Config = { host: '127.0.0.1', port: 0, publicUrl: 'http://localhost:3000', trustProxy: false, maxRooms: 1000, logLevel: 'debug',
+    mcpCallsPerMinute: 120, maxTotalBytes: 256 * 1024 * 1024, createRooms: true, createKeyFailsPer10Min: 10, roomsPerIpPerHour: 5, roomTtlSeconds: 3600, ...o.cfg };
   const app = await createApp({ cfg, log, now: () => clock.t, storeOptions: o.storeOptions, createsPerHour: o.createsPerHour ?? 1000, ...o.app });
   const port = await app.listen();
   const url = `http://127.0.0.1:${port}`;

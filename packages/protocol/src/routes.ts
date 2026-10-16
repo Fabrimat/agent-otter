@@ -9,7 +9,7 @@ export const TICKET = /^[0-9a-f]{32}$/;
 export const AGENT_TOKEN = /^[A-Za-z0-9_-]{32,64}$/; // 32 to 64 chars of base64url/hex
 
 // ---- headers ----
-export const HEADERS = { invite: 'x-invite-secret', view: 'x-view-secret', admin: 'x-admin-secret' } as const;
+export const HEADERS = { invite: 'x-invite-secret', view: 'x-view-secret', admin: 'x-admin-secret', create: 'x-create-key' } as const;
 
 // ---- paths ----
 const rid = (id: string) => {
@@ -25,7 +25,8 @@ const qs = (o: Record<string, string | number | undefined>) => {
 
 /** Express-style patterns (`:id`) for the server router; builders for clients. */
 export const ROUTES = {
-  createRoom: '/rooms/anonymous', // POST
+  createRoom: '/rooms/anonymous', // POST; HEADERS.create required when config says createRequiresKey
+  config: '/api/config', // GET, public, PublicConfig
   room: (id: string) => `/rooms/${rid(id)}`, // GET
   join: (id: string) => `/rooms/${rid(id)}/join`, // POST
   admin: (id: string) => `/rooms/${rid(id)}/admin`, // POST
@@ -49,7 +50,14 @@ export const ROUTES = {
 export const ErrorResponse = z.object({ error: z.string(), code: ErrorCode.optional() });
 export type ErrorResponse = z.infer<typeof ErrorResponse>;
 
-/** POST /rooms/anonymous: body CreateRoomRequest, response CreateRoomResponse (schemas.ts). */
+/**
+ * POST /rooms/anonymous: body CreateRoomRequest, response CreateRoomResponse (schemas.ts).
+ * Errors: 503 create_disabled (creation switched off), 403 create_forbidden (key required and missing/wrong).
+ */
+
+/** GET /api/config: public, no auth. What the web app needs before it offers to create a room. */
+export const PublicConfig = z.object({ createRequiresKey: z.boolean(), createEnabled: z.boolean(), ttlSeconds: z.number().int().positive() });
+export type PublicConfig = z.infer<typeof PublicConfig>;
 
 /** GET /rooms/:id. Header accepted: exactly one of HEADERS.invite | view | admin (any of the three). */
 export const RoomPublicInfo = z.object({

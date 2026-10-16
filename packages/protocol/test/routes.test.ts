@@ -45,7 +45,7 @@ describe('routes', () => {
     expect(SECRET.test('G'.repeat(32))).toBe(false);
     expect(AGENT_TOKEN.test('a_b-'.repeat(8))).toBe(true);
     expect(AGENT_TOKEN.test('a b'.repeat(12))).toBe(false);
-    expect(HEADERS).toEqual({ invite: 'x-invite-secret', view: 'x-view-secret', admin: 'x-admin-secret' });
+    expect(HEADERS).toEqual({ invite: 'x-invite-secret', view: 'x-view-secret', admin: 'x-admin-secret', create: 'x-create-key' });
   });
   it('query schemas coerce and cap', () => {
     expect(MessagesQuery.parse({ beforeSeq: '5', limit: '50' })).toEqual({ beforeSeq: 5, limit: 50 });
@@ -58,7 +58,7 @@ describe('routes', () => {
   it('responses', () => {
     expect(ErrorResponse.safeParse({ error: 'x', code: 'bad_secret' }).success).toBe(true);
     expect(ErrorResponse.safeParse({ error: 'x', code: 'nope' }).success).toBe(false);
-    expect(ErrorCode.options).toEqual(expect.arrayContaining(['bad_secret', 'room_not_found', 'room_closed', 'rate_limited', 'secret_detected', 'name_taken', 'reserved_name', 'payload_too_large', 'forbidden_role']));
+    expect(ErrorCode.options).toEqual(expect.arrayContaining(['create_forbidden', 'create_disabled', 'bad_secret', 'room_not_found', 'room_closed', 'rate_limited', 'secret_detected', 'name_taken', 'reserved_name', 'payload_too_large', 'forbidden_role']));
     expect(WsTicketResponse.safeParse({ ticket, role: 'viewer', expiresInSeconds: 30 }).success).toBe(true);
     expect(WsTicketResponse.safeParse({ ticket, role: 'root', expiresInSeconds: 30 }).success).toBe(false);
     expect(RoomPublicInfo.safeParse({ roomId: id, topic: '', expiresAt: 1, participants: [], paused: false, closed: false }).success).toBe(true);

@@ -8,13 +8,22 @@ import { RoomView } from './RoomView';
 import { clearRoom, loadRoom, parseFragment, saveRoom, type StoredRoom } from './storage';
 import { useRoomSocket } from './useRoomSocket';
 
-const errMsg = (e: unknown) => (e instanceof ApiError ? `${e.message}${e.code ? ` (${e.code})` : ''}` : 'Something went wrong. Try again.');
+const errMsg = (e: unknown) => {
+  if (e instanceof ApiError && e.code === 'create_forbidden') return 'The access key is missing or wrong. Check it and try again.';
+  if (e instanceof ApiError && e.code === 'create_disabled') return 'Room creation is turned off on this server.';
+  return e instanceof ApiError ? `${e.message}${e.code ? ` (${e.code})` : ''}` : 'Something went wrong. Try again.';
+};
+const KEY = 'ao:createKey'; // sessionStorage only: gone when the tab closes
 
 export function Home() {
   const nav = useNavigate();
   const [topic, setTopic] = useState('');
+  const [key, setKey] = useState(() => sessionStorage.getItem(KEY) ?? '');
+  const config = useQuery({ queryKey: ['config'], queryFn: api.config, retry: false });
+  const needsKey = config.data?.createRequiresKey === true;
+  const disabled = config.data?.createEnabled === false;
   const create = useMutation({
-    mutationFn: () => api.createRoom(topic.trim() ? { topic: topic.trim() } : {}),
+    mutationFn: () => api.createRoom(topic.trim() ? { topic: topic.trim() } : {}, needsKey ? key.trim() : undefined),
     onSuccess: ({ roomId, adminSecret, inviteSecret, viewSecret, expiresAt }) => {
       saveRoom({ roomId, adminSecret, inviteSecret, viewSecret, expiresAt });
       nav(`/r#${roomId}`, { replace: true }); // no secret in the URL or history; the admin page restores from localStorage
@@ -34,7 +43,28 @@ export function Home() {
           <span className="font-semibold">Topic (optional)</span>
           <input className={input} value={topic} maxLength={LIMITS.topicChars} onChange={(e) => setTopic(e.target.value)} />
         </label>
-        <button type="submit" className={btnPrimary} disabled={create.isPending}>
+        {needsKey && (
+          <label className="block">
+            <span className="font-semibold">Access key</span>
+            <input
+              className={input}
+              type="password"
+              autoComplete="off"
+              required
+              value={key}
+              onChange={(e) => {
+                setKey(e.target.value);
+                sessionStorage.setItem(KEY, e.target.value);
+              }}
+            />
+          </label>
+        )}
+        {disabled && (
+          <p role="alert" className="text-red-800">
+            {errMsg(new ApiError('', 503, 'create_disabled'))}
+          </p>
+        )}
+        <button type="submit" className={btnPrimary} disabled={create.isPending || disabled}>
           Create room
         </button>
         {create.isError && (
@@ -158,7 +188,7 @@ function JoinForm({ roomId, inviteSecret }: { roomId: string; inviteSecret: stri
         {blocks.map(([title, text]) => (
           <section key={title} aria-label={title} className="space-y-1">
             <h2 className="font-semibold">{title}</h2>
-            <pre className="overflow-x-auto rounded bg-slate-900 p-2 text-sm text-slate-50">{text}</pre>
+            <pre tabIndex={0} className="overflow-x-auto rounded bg-slate-900 p-2 text-sm text-slate-50">{text}</pre>
             <CopyButton text={text} />
           </section>
         ))}

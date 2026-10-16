@@ -1,16 +1,16 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import {
   AdminAction, CreateRoomRequest, HEADERS, JoinRequest, LIMITS, MessagesQuery, ROOM_ID, ROUTES, buildSnippets,
-  type JoinResponse, type MessagesResponse, type WsTicketResponse,
+  type JoinResponse, type MessagesResponse, type PublicConfig, type WsTicketResponse,
 } from '@agent-office/protocol';
 import type { z } from 'zod/v4';
 import type { Config } from './config.js';
 import { toDelivered } from './deliver.js';
 import { StoreError } from './errors.js';
 import { clientIp, fail, readJson, send } from './http.js';
-import type { Logger } from './log.js';
+import { errKind, type Logger } from './log.js';
 import type { SlidingWindow } from './ratelimit.js';
-import type { Role, RoomStore } from './store.js';
+import { sameSecret, type Role, type RoomStore } from './store.js';
 
 type Ctx = { req: IncomingMessage; res: ServerResponse; url: URL; params: Record<string, string> };
 type Handler = (c: Ctx) => Promise<void>;
@@ -18,7 +18,7 @@ type Handler = (c: Ctx) => Promise<void>;
 /** Express-style pattern from the protocol contract (`/rooms/:id/join`) to a regex. */
 const compile = (p: string) => new RegExp('^' + p.replace(/:(\w+)/g, '(?<$1>[^/]+)') + '$');
 
-export function createRest(d: { store: RoomStore; log: Logger; cfg: Config; createLimiter: SlidingWindow }) {
+export function createRest(d: { store: RoomStore; log: Logger; cfg: Config; createLimiter: SlidingWindow; keyFailLimiter: SlidingWindow }) {
   const { store, log, cfg } = d;
   const P = ROUTES.patterns;
 
@@ -43,10 +43,31 @@ export function createRest(d: { store: RoomStore; log: Logger; cfg: Config; crea
   }
 
   const routes: [string, RegExp, Handler][] = [
+    ['GET', compile(ROUTES.config), async ({ res }) => {
+      const out: PublicConfig = { createRequiresKey: !!cfg.createKey, createEnabled: cfg.createRooms, ttlSeconds: cfg.roomTtlSeconds };
+      send(res, 200, out);
+    }],
     ['POST', compile(ROUTES.createRoom), async ({ req, res }) => {
-      if (!d.createLimiter.hit(clientIp(req, cfg.trustProxy))) {
+      if (!cfg.createRooms) throw new StoreError('create_disabled', 'room creation is switched off on this server');
+      let keyed = false; // a valid CREATE_KEY holder is trusted: the per-IP room limit (shared by a whole office behind one proxy IP) does not apply
+      if (cfg.createKey) {
+        // brute-force guard: an IP with too many wrong keys is refused WITHOUT comparing, so even the right key waits out the window
+        const ip = clientIp(req, cfg.trustProxy);
+        if (d.keyFailLimiter.full(ip)) {
+          log.warn({ evt: 'rate_limited', kind: 'create_key', ip });
+          throw new StoreError('rate_limited', 'too many wrong create keys, try again later');
+        }
+        const k = req.headers[HEADERS.create];
+        if (typeof k !== 'string' || !sameSecret(cfg.createKey, k)) {
+          d.keyFailLimiter.hit(ip);
+          log.warn({ evt: 'create_forbidden', ip }); // normalised IP, never the submitted key
+          throw new StoreError('create_forbidden', 'a valid create key is required to create a room');
+        }
+        keyed = true;
+      }
+      if (!keyed && !d.createLimiter.hit(clientIp(req, cfg.trustProxy))) {
         log.warn({ evt: 'rate_limited', kind: 'room_create' });
-        throw new StoreError('rate_limited', `room creation limit reached (${LIMITS.roomsPerIpPerHour} per hour)`);
+        throw new StoreError('rate_limited', `room creation limit reached (${cfg.roomsPerIpPerHour} per hour)`);
       }
       const { topic } = parse(CreateRoomRequest, await body(req));
       send(res, 200, await store.createRoom(topic ?? ''));
@@ -88,7 +109,7 @@ export function createRest(d: { store: RoomStore; log: Logger; cfg: Config; crea
     }],
     ['POST', compile(P.wsTicket), async (c) => {
       const role = await auth(c, ['admin', 'view']);
-      const t = await store.issueTicket(c.params.id!, role === 'admin' ? 'admin' : 'viewer');
+      const t = await store.issueTicket(c.params.id!, role === 'admin' ? 'admin' : 'viewer', clientIp(c.req, cfg.trustProxy));
       const out: WsTicketResponse = t;
       send(c.res, 200, out);
     }],
@@ -106,7 +127,7 @@ export function createRest(d: { store: RoomStore; log: Logger; cfg: Config; crea
       } catch (e) {
         if (e instanceof StoreError) fail(res, e.code, e.message);
         else {
-          log.error({ evt: 'internal', err: (e as Error).message });
+          log.error({ evt: 'internal', err: errKind(e) });
           if (!res.headersSent) fail(res, 'internal', 'internal error');
         }
       }

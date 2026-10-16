@@ -1,6 +1,6 @@
 // REST client for the protocol contract. Secrets travel only in headers, never in URLs; every response is zod-validated.
 import {
-  AdminResponse, CreateRoomResponse, ErrorResponse, HEADERS, JoinResponse, MessagesResponse, ROUTES, RoomPublicInfo, WsTicketResponse,
+  AdminResponse, CreateRoomResponse, ErrorResponse, HEADERS, JoinResponse, MessagesResponse, PublicConfig, ROUTES, RoomPublicInfo, WsTicketResponse,
   type CreateRoomRequest, type ErrorCode, type JoinRequest,
 } from '@agent-office/protocol';
 type Schema<T> = { safeParse(x: unknown): { success: true; data: T } | { success: false } };
@@ -35,7 +35,9 @@ const auth = (s: Secret) => ({ [HEADERS[s.kind]]: s.value });
 export type AdminActionInput = { action: 'kick'; participantId: string } | { action: 'close' } | { action: 'pause'; paused: boolean };
 
 export const api = {
-  createRoom: (body: CreateRoomRequest) => call(CreateRoomResponse, ROUTES.createRoom, { method: 'POST', body }),
+  config: () => call(PublicConfig, ROUTES.config),
+  createRoom: (body: CreateRoomRequest, createKey?: string) =>
+    call(CreateRoomResponse, ROUTES.createRoom, { method: 'POST', body, headers: createKey ? { [HEADERS.create]: createKey } : undefined }),
   getRoom: (id: string, s: Secret) => call(RoomPublicInfo, ROUTES.room(id), { headers: auth(s) }),
   join: (id: string, body: JoinRequest) => call(JoinResponse, ROUTES.join(id), { method: 'POST', body }),
   admin: (id: string, adminSecret: string, body: AdminActionInput) =>

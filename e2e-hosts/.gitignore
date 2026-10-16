@@ -1,0 +1,3 @@
+results/*
+!results/latest.md
+!results/.gitkeep

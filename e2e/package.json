@@ -1,0 +1,22 @@
+{
+  "name": "@agent-office/e2e",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "e2e": "playwright test"
+  },
+  "dependencies": {
+    "@agent-office/protocol": "workspace:*"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "^4.10.0",
+    "@modelcontextprotocol/client": "^2.3.1",
+    "@playwright/test": "^1.50.0",
+    "@types/node": "^22.0.0",
+    "@types/ws": "^8.5.0",
+    "typescript": "^7.0.2",
+    "ws": "^8.18.0"
+  }
+}

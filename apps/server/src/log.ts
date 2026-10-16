@@ -18,5 +18,8 @@ export const createLogger = (level: string, dest?: DestinationStream): Logger =>
     dest,
   );
 
+/** The only thing an unexpected error contributes to a log line: its class name (messages can carry content). */
+export const errKind = (e: unknown): string => (e instanceof Error ? e.name : typeof e);
+
 /** Access-log path: query dropped (WS tickets), `/mcp/<token>` fallback token replaced. */
 export const redactPath = (pathname: string): string => pathname.replace(/^\/mcp\/.*/, '/mcp/<redacted>');

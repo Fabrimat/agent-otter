@@ -4,11 +4,12 @@ import { createMcpHandler, McpServer } from '@modelcontextprotocol/server';
 import { toNodeHandler } from '@modelcontextprotocol/node';
 import {
   AGENT_INSTRUCTIONS, AGENT_TOKEN, LIMITS, RoomHistoryInput, RoomInboxInput, RoomLeaveInput, RoomParticipantsInput, RoomSendInput, TOOL_DESCRIPTIONS,
-  detectSecrets, wrapDelivery, wrapInfoBlock, type StoredMessage,
+  wrapDelivery, wrapInfoBlock, type StoredMessage,
 } from '@agent-office/protocol';
 import { StoreError } from './errors.js';
 import { send } from './http.js';
-import type { Logger } from './log.js';
+import { errKind, type Logger } from './log.js';
+import { SlidingWindow } from './ratelimit.js';
 import type { Identity, Names, RoomStore } from './store.js';
 
 const BYTE_CAP = 48 * 1024; // per room_inbox / room_history / piggyback call
@@ -17,8 +18,9 @@ const BODY_CAP = 64 * 1024;
 const text = (t: string) => ({ content: [{ type: 'text' as const, text: t }] });
 const fault = (t: string) => ({ content: [{ type: 'text' as const, text: t }], isError: true });
 
-export function createMcp(d: { store: RoomStore; log: Logger }) {
+export function createMcp(d: { store: RoomStore; log: Logger; now?: () => number; callsPerMinute?: number }) {
   const { store, log } = d;
+  const calls = new SlidingWindow(d.callsPerMinute ?? 120, 60_000, d.now ?? Date.now); // per participant, every tool call
   type Extra = { who: Identity; signal: AbortSignal };
 
   // `lastSeq`: the cursor the model should continue from (null for history: it is not a cursor read)
@@ -37,25 +39,27 @@ export function createMcp(d: { store: RoomStore; log: Logger }) {
     const s = new McpServer({ name: 'agent-office', version: '0.0.1' }, { instructions: AGENT_INSTRUCTIONS });
     // StoreError becomes a tool error the model can read; anything else propagates to the SDK (generic error to the client).
     const guard = <A>(fn: (a: A) => Promise<ReturnType<typeof text>>) => async (a: A) => {
+      if (!calls.hit(who.participantId)) {
+        log.warn({ evt: 'rate_limited', kind: 'mcp', roomId: who.roomId, participantId: who.participantId });
+        return fault('rate_limited: too many tool calls, wait a moment and slow down');
+      }
       try {
         return await fn(a);
       } catch (e) {
-        if (e instanceof StoreError) return fault(`${e.code}: ${e.message}`);
-        log.error({ evt: 'internal', err: (e as Error).message, tool: true });
+        if (e instanceof StoreError) {
+          if (e.code === 'secret_detected') log.warn({ evt: 'secret_blocked', via: 'mcp', roomId: who.roomId, participantId: who.participantId });
+          return fault(`${e.code}: ${e.message}`);
+        }
+        log.error({ evt: 'internal', err: errKind(e), tool: true });
         throw e;
       }
     };
 
     s.registerTool('room_send', { description: TOOL_DESCRIPTIONS.room_send, inputSchema: RoomSendInput }, guard(async ({ content, replyTo, clientMsgId }) => {
-      const kinds = detectSecrets(content);
-      if (kinds.length) {
-        log.warn({ evt: 'secret_blocked', via: 'mcp', roomId: who.roomId, participantId: who.participantId, kinds });
-        return fault(`secret_detected: not sent, the message looks like it contains a secret (${kinds.join(', ')}). Remove it and send again.`);
-      }
       const sent = await store.send(who.roomId, who.participantId, { content, replyTo, clientMsgId });
       // the message is already stored: a failing piggyback must not turn a successful send into an error (a retry would be a duplicate)
-      const piggyback = await news(who).catch((e: Error) => {
-        log.error({ evt: 'piggyback_failed', err: e.name, roomId: who.roomId });
+      const piggyback = await news(who).catch((e: unknown) => {
+        log.error({ evt: 'piggyback_failed', err: errKind(e), roomId: who.roomId });
         return undefined;
       });
       return text(`sent seq=${sent.seq} id=${sent.id} duplicate=${sent.duplicate}\n${piggyback ?? '(could not read new messages, call room_inbox)'}`);

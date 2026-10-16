@@ -95,7 +95,7 @@ describe('static files', () => {
     expect(idx.body).toContain('<title>spa</title>');
     const csp = String(idx.headers['content-security-policy']);
     expect(csp).toContain("default-src 'self'");
-    expect(csp).toContain("connect-src 'self' ws: wss:");
+    expect(csp).toContain("connect-src 'self';");
     expect(csp).toContain("frame-ancestors 'none'");
     expect(csp).not.toMatch(/script-src[^;]*unsafe-inline/);
     expect(idx.headers['referrer-policy']).toBe('no-referrer');

@@ -6,6 +6,7 @@ import { StoreError } from './errors.js';
 export const STATUS: Record<ErrorCode, number> = {
   bad_request: 400, bad_secret: 403, room_not_found: 404, room_closed: 410, room_paused: 409, rate_limited: 429, secret_detected: 422,
   name_taken: 409, reserved_name: 400, payload_too_large: 413, forbidden_role: 403, bad_ticket: 401, room_full: 409, internal: 500,
+  create_forbidden: 403, create_disabled: 503,
 };
 
 export function send(res: ServerResponse, status: number, body: unknown, headers: Record<string, string> = {}) {

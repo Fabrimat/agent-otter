@@ -29,13 +29,14 @@ describe('buildSnippets', () => {
       expect(a.slice(0, 6)).toEqual(['claude', 'mcp', 'add', '--transport', 'http', 'agent-office']);
       expect(a[6]).toBe('https://x.example/mcp');
       expect(a[7]).toBe('--header');
-      expect(a.slice(8).join(' ')).toMatch(/^"Authorization: Bearer \$/);
+      expect(a.slice(8).join(' ')).toBe("'Authorization: Bearer ${AGENT_OFFICE_TOKEN}'");
     }
   });
-  it('uses env vars for the header, token only in the assignment', () => {
-    expect(s.claudeCode).toBe('export AGENT_OFFICE_TOKEN=tok_123-ABxxxxxxxxxxxxxxxxxxxxxx\nclaude mcp add --transport http agent-office https://x.example/mcp --header "Authorization: Bearer $AGENT_OFFICE_TOKEN"');
+  it('header keeps a literal ${AGENT_OFFICE_TOKEN} (single-quoted); token only in the assignment', () => {
+    expect(s.claudeCode).toBe(`export AGENT_OFFICE_TOKEN=tok_123-ABxxxxxxxxxxxxxxxxxxxxxx
+claude mcp add --transport http agent-office https://x.example/mcp --header 'Authorization: Bearer \${AGENT_OFFICE_TOKEN}'`);
     expect(s.claudeCodePowerShell).toContain('$env:AGENT_OFFICE_TOKEN = "tok_123-ABxxxxxxxxxxxxxxxxxxxxxx"');
-    expect(s.claudeCodePowerShell).toContain('Bearer $env:AGENT_OFFICE_TOKEN"');
+    expect(s.claudeCodePowerShell).toContain("--header 'Authorization: Bearer ${AGENT_OFFICE_TOKEN}'");
     expect(s.claudeCode.split('tok_123-ABxxxxxxxxxxxxxxxxxxxxxx')).toHaveLength(2);
   });
   it('codex and fallback', () => {
@@ -44,7 +45,12 @@ describe('buildSnippets', () => {
     expect(s.codexPowerShell).toContain('setx AGENT_OFFICE_TOKEN');
     expect(s.pathFallbackUrl).toBe('https://x.example/mcp/tok_123-ABxxxxxxxxxxxxxxxxxxxxxx');
   });
-  it('note says UNTESTED', () => expect(note).toMatch(/UNTESTED/));
+  it('note says exactly what was executed and what was not, and keeps UNTESTED for the rest', () => {
+    expect(note).toMatch(/Executed OK on Windows with Claude Code 2\.1\.301 and Codex CLI 0\.163\.0/);
+    expect(note).toMatch(/NOT executed: the setx line, the path-fallback URL, the default and user scope/);
+    expect(note).toMatch(/UNTESTED on every other host/);
+    expect(note).not.toMatch(/VERIFIED/);
+  });
   it('rejects shell-breaking input', () => {
     expect(() => buildSnippets('https://x.example"; rm -rf ~', 't')).toThrow();
     expect(() => buildSnippets('https://x.example', 'a"b')).toThrow();
