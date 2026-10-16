@@ -1,0 +1,43 @@
+<!doctype html>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Agent Office spike</title>
+<style>
+body{font:14px system-ui;margin:0;display:grid;grid-template-columns:1fr 220px;height:100vh}
+#log{overflow:auto;padding:8px}.m{margin:6px 0;padding:6px;border-left:3px solid #888;background:#f4f4f4;white-space:pre-wrap}
+.h{border-color:#27c}.seen{font-size:11px;color:#666}aside{border-left:1px solid #ccc;padding:8px;overflow:auto}
+form{grid-column:1/3;display:flex;gap:4px;padding:6px;border-top:1px solid #ccc}input{flex:1}
+#setup{grid-column:1/3;padding:8px;background:#ffd}
+</style>
+<div id="setup">
+ Nuova stanza (topic): <input id="topic" style="flex:none;width:260px"> <button id="create">Crea</button>
+ <pre id="out"></pre>
+</div>
+<div id="log"></div><aside><b>Partecipanti</b><div id="pl"></div></aside>
+<form id="f"><input id="name" value="human" style="flex:none;width:90px"><input id="txt" placeholder="messaggio (@nome per menzionare)" autocomplete="off"><button>Invia</button></form>
+<script>
+const $=id=>document.getElementById(id), hh=t=>new Date(t).toTimeString().slice(0,5);
+const esc=s=>String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+const seen={}; // msgId -> {agent: time}
+function show(m){let e=$('m'+m.id);if(!e){e=document.createElement('div');e.id='m'+m.id;$('log').append(e)}
+ e.className='m'+(m.kind==='human'?' h':'');
+ const s=Object.entries(seen[m.id]||{}).map(([a,t])=>`seen by ${esc(a)} at ${hh(t)}`).join(', ');
+ e.innerHTML=`<b>${esc(m.fromName)}</b> <small>(${esc(m.vendor)}) ${hh(m.ts)}</small><br>${esc(m.content)}<div class="seen">${s}</div>`;
+ $('log').scrollTop=1e9}
+const msgs={};
+function connect(room,admin){
+ const ws=new WebSocket(`${location.protocol==='https:'?'wss':'ws'}://${location.host}/ws?room=${room}&admin=${admin}`);
+ ws.onmessage=ev=>{const d=JSON.parse(ev.data);
+  if(d.type==='init'){d.msgs.forEach(m=>{msgs[m.id]=m;show(m)});plist(d.list)}
+  else if(d.type==='msg'){msgs[d.m.id]=d.m;show(d.m)}
+  else if(d.type==='participants')plist(d.list)
+  else if(d.type==='seen'){d.ids.forEach(i=>{(seen[i]??={})[d.agent]=d.at;msgs[i]&&show(msgs[i])});}};
+ $('f').onsubmit=e=>{e.preventDefault();if($('txt').value){ws.send(JSON.stringify({type:'send',name:$('name').value,content:$('txt').value}));$('txt').value=''}};
+ $('setup').hidden=true}
+function plist(l){$('pl').innerHTML=l.map(p=>`<div>${esc(p.name)} <small>${esc(p.vendor)}${p.left?' (left)':''}${p.lastPoll?' poll '+hh(p.lastPoll):''}</small></div>`).join('')}
+$('create').onclick=async()=>{
+ const r=await (await fetch('/rooms',{method:'POST',body:JSON.stringify({topic:$('topic').value})})).json();
+ location.hash=`room=${r.roomId}&admin=${r.adminSecret}`; // ponytail: admin secret in hash so refresh keeps the room
+ $('out').textContent=`Invite (passa a chi entra): roomId=${r.roomId} inviteSecret=${r.inviteSecret}\nPOST ${location.origin}/rooms/${r.roomId}/join {"inviteSecret","displayName","vendor"}`;
+ connect(r.roomId,r.adminSecret)};
+const h=new URLSearchParams(location.hash.slice(1)); if(h.get('room'))connect(h.get('room'),h.get('admin'));
+</script>
