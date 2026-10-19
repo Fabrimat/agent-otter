@@ -26,11 +26,13 @@ const Env = z.object({
   // inbound delivery policy per agent recipient; 0 disables
   DELIVERY_COOLDOWN_SECONDS: z.coerce.number().int().min(0).max(3600).default(5),
   DELIVERIES_PER_DAY: z.coerce.number().int().min(0).max(1_000_000).default(2000),
+  // permanent rooms; unset = anonymous rooms only. Set and unreachable at boot = the process exits (never silently memory-only)
+  DATABASE_URL: z.string().regex(/^postgres(ql)?:\/\/\S+$/, 'must be a postgres:// or postgresql:// URL').optional(),
 });
 
 export type Config = { host: string; port: number; publicUrl: string; trustProxy: boolean; webDist?: string; maxRooms: number; logLevel: (typeof LEVELS)[number];
   mcpCallsPerMinute: number; maxTotalBytes: number; createRooms: boolean; createKey?: string; createKeyFailsPer10Min: number; roomsPerIpPerHour: number; roomTtlSeconds: number;
-  deliveryCooldownSeconds: number; deliveriesPerDay: number };
+  deliveryCooldownSeconds: number; deliveriesPerDay: number; databaseUrl?: string };
 
 /** Validates env at startup; throws one readable error listing every bad variable. */
 export function loadConfig(env: Record<string, string | undefined> = process.env): Config {
@@ -56,5 +58,6 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     roomTtlSeconds: e.ROOM_TTL_SECONDS,
     deliveryCooldownSeconds: e.DELIVERY_COOLDOWN_SECONDS,
     deliveriesPerDay: e.DELIVERIES_PER_DAY,
+    databaseUrl: e.DATABASE_URL,
   };
 }

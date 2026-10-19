@@ -11,9 +11,17 @@ try {
   process.exit(1);
 }
 const log = createLogger(cfg.logLevel);
-const app = await createApp({ cfg, log });
+let app: Awaited<ReturnType<typeof createApp>>;
+try {
+  app = await createApp({ cfg, log }); // migrations and permanent-room rehydration happen here, before listen
+} catch (e) {
+  log.fatal({ evt: 'boot_failed', kind: e instanceof Error ? e.name : typeof e }); // kind only: a driver message can carry connection details
+  log.flush();
+  process.exit(1);
+}
 const port = await app.listen();
-log.info({ evt: 'listening', host: (app.server.address() as AddressInfo).address, port, publicUrl: cfg.publicUrl, trustProxy: cfg.trustProxy, webDist: !!cfg.webDist, maxRooms: cfg.maxRooms });
+log.info({ evt: 'listening', host: (app.server.address() as AddressInfo).address, port, publicUrl: cfg.publicUrl, trustProxy: cfg.trustProxy, webDist: !!cfg.webDist, maxRooms: cfg.maxRooms,
+  persistence: !!cfg.databaseUrl });
 
 // log a kind only (never the error message: it could carry content), then exit non-zero
 for (const evt of ['unhandledRejection', 'uncaughtException'] as const) {

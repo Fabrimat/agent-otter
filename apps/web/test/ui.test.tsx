@@ -119,7 +119,7 @@ describe('home access gate', () => {
 });
 
 describe('RoomView', () => {
-  const admin = { inviteLink: 'i', viewLink: 'v', onAction: vi.fn(), onSend: vi.fn(() => true) };
+  const admin = { inviteLink: 'i', viewLink: 'v', onAction: vi.fn(), onSend: vi.fn(() => true), ready: true };
   const s = state({ participants: [person()] });
 
   it('viewer has no send box and no admin controls', () => {

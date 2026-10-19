@@ -22,6 +22,15 @@ Origine: supervisione Fable sul codice della fase 1a (2026-10-16), più i punti 
 - Secondo adattatore host testato per davvero (Codex).
 - Pagina "storia più vecchia": il primo caricamento mostra solo gli ultimi 200 messaggi e il web non usa ancora la REST `messages`.
 
+## Aperti dopo la fase 2a (stanze permanenti)
+
+- Evento live `message_deleted`: dopo un `erase` le altre schede aperte vedono il `[deleted]` solo dopo il ricaricamento.
+- Job di retention: i messaggi delle stanze permanenti restano finché non vengono cancellati a mano (T-10/T-11).
+- Race WS pre-init: il server scarta un `send_message` arrivato prima di `init`. Il web ora non lo invia (invio bloccato finché non arriva `init`, con test unitario), ma un altro client WS può ancora perdere il messaggio senza errore: valutare un errore esplicito lato server.
+- `maxRooms` conta anche le stanze permanenti chiuse (gusci): una stanza chiusa occupa ancora uno slot.
+- Partecipanti usciti senza limite nelle stanze permanenti: la lista cresce nel tempo.
+- Lista 2b: GitHub OAuth, utenti e proprietà, claim della stanza, UI dei token, audit log, upgrade con consenso, job di retention, export, auto-cancellazione dell'autore, LISTEN/NOTIFY.
+
 ## Rifiniture (nessuna urgenza)
 
 - Spostare `detectSecrets` nel punto unico `store.send` invece che nei due chiamanti (`mcp.ts`, `ws.ts`).

@@ -30,6 +30,7 @@ RUN pnpm --filter @agent-office/protocol build \
 RUN --mount=type=cache,id=pnpm,target=/root/.local/share/pnpm/store \
     pnpm --filter @agent-office/server deploy --prod --legacy /out \
  && cp -r apps/server/dist /out/dist \
+ && cp -r apps/server/migrations /out/migrations \
  && cd /out && node -e "import('@agent-office/protocol').then(() => import('./dist/app.js'))"
 
 # ---- 3. runtime ----
@@ -40,8 +41,9 @@ WORKDIR /app
 COPY --from=build /out/node_modules ./node_modules
 COPY --from=build /out/package.json ./package.json
 COPY --from=build /out/dist ./dist
+COPY --from=build /out/migrations ./migrations
 COPY --from=build /repo/apps/web/dist ./web
-# the app keeps everything in memory and writes nothing to disk: safe with --read-only
+# the app writes nothing to disk (permanent rooms live in Postgres via DATABASE_URL): safe with --read-only
 USER node
 EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \

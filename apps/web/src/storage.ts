@@ -1,7 +1,7 @@
 // Per-room secrets in localStorage (THREAT-MODEL T-07). Cleared when the room is closed or expired.
 import { ROOM_ID, SECRET } from '@agent-office/protocol';
 
-export type StoredRoom = { roomId: string; adminSecret: string; inviteSecret: string; viewSecret: string; expiresAt: number };
+export type StoredRoom = { roomId: string; adminSecret: string; inviteSecret: string; viewSecret: string; expiresAt: number | null }; // null = permanent room, never expires
 const key = (id: string) => `ao:room:${id}`;
 const LAST = 'ao:lastRoom';
 
@@ -16,7 +16,7 @@ export function loadRoom(id: string | null): StoredRoom | null {
   try {
     const r = JSON.parse(localStorage.getItem(key(rid)) ?? 'null') as Partial<StoredRoom> | null;
     if (!r || r.roomId !== rid || ![r.adminSecret, r.inviteSecret, r.viewSecret].every((s) => typeof s === 'string' && SECRET.test(s))) return null;
-    if (typeof r.expiresAt !== 'number' || r.expiresAt <= Date.now()) return (clearRoom(rid), null);
+    if (r.expiresAt !== null && (typeof r.expiresAt !== 'number' || r.expiresAt <= Date.now())) return (clearRoom(rid), null);
     return r as StoredRoom;
   } catch {
     return null;

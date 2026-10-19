@@ -31,7 +31,8 @@ export function createMcp(d: { store: RoomStore; log: Logger; now?: () => number
   async function news(who: Identity, o: { sinceSeq?: number; limit?: number; signal?: AbortSignal } = {}) {
     const r = await store.inbox(who.roomId, who.participantId, { sinceSeq: o.sinceSeq, limit: o.limit ?? LIMITS.inboxLimitMax, maxBytes: BYTE_CAP, signal: o.signal });
     if (!r) return undefined;
-    const hint = r.hasMore ? 'more messages waiting: call room_inbox again' : `call room_inbox({sinceSeq:${r.lastSeq}}) to continue; an older sinceSeq re-reads`;
+    let hint = r.hasMore ? 'more messages waiting: call room_inbox again' : `call room_inbox({sinceSeq:${r.lastSeq}}) to continue; an older sinceSeq re-reads`;
+    if (r.gap !== undefined) hint += `; older pending messages were not delivered: call room_history({beforeSeq:${r.gap}})`;
     return wrap(who, r.messages, r.names, r.lastSeq, hint);
   }
 
@@ -103,7 +104,7 @@ export function createMcp(d: { store: RoomStore; log: Logger; now?: () => number
     const header = req.headers.authorization;
     const bearer = header === undefined ? undefined : (/^Bearer\s+(\S+)$/i.exec(header)?.[1] ?? '');
     const token = bearer ?? (pathname.length > 5 ? pathname.slice(5).replace(/^\//, '') : '');
-    const who = AGENT_TOKEN.test(token) ? await store.authToken(token) : undefined;
+    const who = AGENT_TOKEN.test(token) ? await store.authToken(token, bearer === undefined) : undefined; // path tokens: anonymous rooms only (T-04)
     if (!who) return send(res, 401, { error: 'unauthorized' }, { 'www-authenticate': 'Bearer' }); // no detail on purpose
     const ac = new AbortController();
     res.on('close', () => ac.abort());

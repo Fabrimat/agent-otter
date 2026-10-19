@@ -1,6 +1,6 @@
 # @agent-office/server
 
-In-memory room server: REST + WebSocket for the browser, MCP for agents. Nothing is written to disk. Config is read from the environment at startup; an invalid value stops the process with one readable error.
+Room server: REST + WebSocket for the browser, MCP for agents. Anonymous rooms live in memory only (nothing on disk, nothing in a database). Permanent rooms (optional, `DATABASE_URL`) are stored in Postgres. Config is read from the environment at startup; an invalid value stops the process with one readable error.
 
 ## Configuration
 
@@ -19,6 +19,7 @@ In-memory room server: REST + WebSocket for the browser, MCP for agents. Nothing
 | `CREATE_ROOMS` | `true` | `false`/`0`: `POST /rooms/anonymous` answers 503 `create_disabled`. Restart to flip. |
 | `CREATE_KEY` | unset | When set, `POST /rooms/anonymous` needs header `x-create-key` equal to it (constant-time compare), else 403 `create_forbidden`. Never logged. |
 | `CREATE_KEY_FAILS_PER_10MIN` | `10` | Wrong `x-create-key` attempts allowed per client IP per 10 minutes. Beyond it the IP gets 429 `rate_limited` without the key being compared (even the right key waits). Successful keys do not count. Shared-IP caveat: 10 wrong keys from one IP (e.g. an office NAT or a proxy without `TRUST_PROXY`) block creation for everyone behind that IP for 10 minutes. |
+| `DATABASE_URL` | unset | `postgres://` or `postgresql://` URL. Enables permanent rooms (`POST /rooms`, which also needs `CREATE_KEY`) and the operator routes; without it they answer 503 `create_disabled`. Migrations run at start. Set and unreachable at start = the process exits non-zero (it never falls back to memory-only). Anonymous rooms never touch it. Secrets and tokens are stored as SHA-256 only; message content is plain text readable by the database operator. Backups are the operator's job. |
 | `ROOM_TTL_SECONDS` | `3600` | Room lifetime, 5..3600. The 1 hour cap is hard; activity never extends it. |
 | `DELIVERY_COOLDOWN_SECONDS` | `5` | After an agent receives a non-empty batch, further messages to it are held this long (0..3600, 0 disables) unless one pending message @mentions it. Held messages stay pending, nothing is lost; a waiting `room_inbox` wakes when the hold ends. Humans are never held. |
 | `DELIVERIES_PER_DAY` | `2000` | Messages delivered per agent per fixed 24 h window (0..1000000, 0 disables). Over it, only a batch containing an @mention is delivered; the rest waits for the window to restart. Delivering a mention also delivers the older pending messages before it (the cursor cannot skip). |
@@ -29,7 +30,10 @@ Fixed limits (no env): ring 1000 messages and 2 MB per room (oldest dropped), 2 
 
 ## Endpoints worth knowing
 
-- `GET /healthz` -> `200 {"ok":true}`, no auth, no room data.
+- `GET /healthz` -> `200 {"ok":true}`, no auth, no room data. With `DATABASE_URL` it includes a `SELECT 1` (cached 10 s); a failing database answers `503 {"ok":false}`.
+- `POST /rooms` (header `x-create-key`): permanent room, `kind: "permanent"`, `expiresAt: null`. Its agent tokens work only with the `Authorization` header (no `/mcp/<token>` path).
+- Operator (header `x-create-key`, same wrong-key limiter): `GET /operator/rooms`, `POST /operator/rooms/:id/rotate` (new invite/view/admin secrets, shown once), `POST /operator/rooms/:id/close`.
+- Admin erase: `POST /rooms/:id/admin {"action":"erase","seq":n}` tombstones one message (`[deleted]` everywhere; open browsers see it after a reload).
 - `GET /api/config` -> `{createRequiresKey, createEnabled, ttlSeconds}`, public.
 - SIGTERM/SIGINT: stop accepting, close WebSockets with a 1001 frame, exit 0 within 5 s.
 

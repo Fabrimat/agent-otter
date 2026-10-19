@@ -32,12 +32,14 @@ async function call<T>(schema: Schema<T>, path: string, init: { method?: string;
 export type Secret = { kind: 'invite' | 'view' | 'admin'; value: string };
 const auth = (s: Secret) => ({ [HEADERS[s.kind]]: s.value });
 
-export type AdminActionInput = { action: 'kick'; participantId: string } | { action: 'close' } | { action: 'pause'; paused: boolean };
+export type AdminActionInput = { action: 'kick'; participantId: string } | { action: 'close' } | { action: 'pause'; paused: boolean } | { action: 'erase'; seq: number };
 
 export const api = {
   config: () => call(PublicConfig, ROUTES.config),
   createRoom: (body: CreateRoomRequest, createKey?: string) =>
     call(CreateRoomResponse, ROUTES.createRoom, { method: 'POST', body, headers: createKey ? { [HEADERS.create]: createKey } : undefined }),
+  createPermanentRoom: (body: CreateRoomRequest, createKey: string) =>
+    call(CreateRoomResponse, ROUTES.createPermanentRoom, { method: 'POST', body, headers: { [HEADERS.create]: createKey } }),
   getRoom: (id: string, s: Secret) => call(RoomPublicInfo, ROUTES.room(id), { headers: auth(s) }),
   join: (id: string, body: JoinRequest) => call(JoinResponse, ROUTES.join(id), { method: 'POST', body }),
   admin: (id: string, adminSecret: string, body: AdminActionInput) =>

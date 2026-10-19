@@ -2,6 +2,7 @@ import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import type { Rng } from '@agent-office/protocol';
 import type { Config } from './config.js';
+import { openDb } from './db.js';
 import { fail, send } from './http.js';
 import { errKind, redactPath, type Logger } from './log.js';
 import { createMcp } from './mcp.js';
@@ -20,11 +21,28 @@ const SECURITY_HEADERS = {
 
 export type AppOptions = { cfg: Config; log: Logger; store?: RoomStore; now?: () => number; rng?: Rng; storeOptions?: MemoryStoreOptions; createsPerHour?: number };
 
+const HEALTH_CACHE_MS = 10_000;
+
 export async function createApp(o: AppOptions) {
   const { cfg, log } = o;
   const now = o.now ?? Date.now;
+  // persistence (permanent rooms) only with DATABASE_URL; unreachable or failing migrations reject here, so the process never runs memory-only by accident
+  const db = cfg.databaseUrl ? openDb(cfg.databaseUrl, (e) => log.error({ evt: 'db_error', op: 'idle', err: errKind(e) })) : undefined;
   const store = o.store ?? new MemoryStore({ now, rng: o.rng, maxRooms: cfg.maxRooms, ttlMs: cfg.roomTtlSeconds * 1000, maxTotalBytes: cfg.maxTotalBytes,
-    deliveryCooldownMs: cfg.deliveryCooldownSeconds * 1000, deliveriesPerDay: cfg.deliveriesPerDay, ...o.storeOptions });
+    deliveryCooldownMs: cfg.deliveryCooldownSeconds * 1000, deliveriesPerDay: cfg.deliveriesPerDay, db, log, ...o.storeOptions });
+  try {
+    await db?.migrate();
+    await store.load();
+  } catch (e) {
+    await db?.end().catch(() => {});
+    throw e;
+  }
+  // cached SELECT 1, run on demand (no timer: an idle server issues no queries)
+  let health = { at: -Infinity, ok: true };
+  const healthy = async () => {
+    if (db && Date.now() - health.at > HEALTH_CACHE_MS) health = { at: Date.now(), ok: await db.ping().then(() => true, () => false) };
+    return health.ok;
+  };
   const rest = createRest({ store, log, cfg, createLimiter: new SlidingWindow(o.createsPerHour ?? cfg.roomsPerIpPerHour, 3600_000, now), keyFailLimiter: new SlidingWindow(cfg.createKeyFailsPer10Min, 600_000, now) });
   const mcp = createMcp({ store, log, now, callsPerMinute: cfg.mcpCallsPerMinute });
   const serveStatic = cfg.webDist ? await createStatic(cfg.webDist) : undefined;
@@ -36,7 +54,7 @@ export async function createApp(o: AppOptions) {
     // access log: method, redacted path (never the query, never a token), status, duration
     res.on('finish', () => log.info({ evt: 'http', method: req.method, path: redactPath(url.pathname), status: res.statusCode, ms: Date.now() - started }));
     try {
-      if (url.pathname === '/healthz' && (req.method === 'GET' || req.method === 'HEAD')) return send(res, 200, { ok: true });
+      if (url.pathname === '/healthz' && (req.method === 'GET' || req.method === 'HEAD')) return (await healthy()) ? send(res, 200, { ok: true }) : send(res, 503, { ok: false });
       if (url.pathname === '/mcp' || url.pathname.startsWith('/mcp/')) return await mcp(req, res, url.pathname);
       if (await rest(req, res, url)) return;
       if (serveStatic && (await serveStatic(req, res, url.pathname))) return;
@@ -57,6 +75,7 @@ export async function createApp(o: AppOptions) {
   return {
     server,
     store,
+    db,
     /** Resolves with the bound port; the bound address is `server.address()`. */
     async listen(): Promise<number> {
       await new Promise<void>((ok) => server.listen(cfg.port, cfg.host, ok));
@@ -70,12 +89,14 @@ export async function createApp(o: AppOptions) {
       await ws.shutdown();
       server.closeAllConnections();
       await stopped;
+      await db?.end();
     },
     async close() {
       clearInterval(sweeper);
       ws.close();
       server.closeAllConnections();
       await new Promise((ok) => server.close(ok));
+      await db?.end();
     },
   };
 }

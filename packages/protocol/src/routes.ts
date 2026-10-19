@@ -1,6 +1,6 @@
 // Single REST/WS/MCP contract for phase 1a: apps/server and apps/web both code against this file.
 import * as z from 'zod/v4';
-import { DeliveredMessage, ErrorCode, LIMITS, ParticipantInfo } from './schemas.js';
+import { DeliveredMessage, ErrorCode, LIMITS, ParticipantInfo, RoomKind } from './schemas.js';
 
 // ---- formats (the server generates hex ids/secrets of exactly these lengths; both sides validate with these) ----
 export const ROOM_ID = /^[0-9a-f]{12}$/;
@@ -26,6 +26,10 @@ const qs = (o: Record<string, string | number | undefined>) => {
 /** Express-style patterns (`:id`) for the server router; builders for clients. */
 export const ROUTES = {
   createRoom: '/rooms/anonymous', // POST; HEADERS.create required when config says createRequiresKey
+  createPermanentRoom: '/rooms', // POST; HEADERS.create always required, and the server needs a database (else 503 create_disabled)
+  operatorRooms: '/operator/rooms', // GET, HEADERS.create: OperatorRoomsResponse
+  operatorRotate: (id: string) => `/operator/rooms/${rid(id)}/rotate`, // POST, HEADERS.create: RotateSecretsResponse (new secrets, shown once)
+  operatorClose: (id: string) => `/operator/rooms/${rid(id)}/close`, // POST, HEADERS.create: AdminResponse
   config: '/api/config', // GET, public, PublicConfig
   room: (id: string) => `/rooms/${rid(id)}`, // GET
   join: (id: string) => `/rooms/${rid(id)}/join`, // POST
@@ -43,6 +47,7 @@ export const ROUTES = {
   },
   patterns: {
     room: '/rooms/:id', join: '/rooms/:id/join', admin: '/rooms/:id/admin', messages: '/rooms/:id/messages', wsTicket: '/rooms/:id/ws-ticket', mcpFallback: '/mcp/:token',
+    operatorRotate: '/operator/rooms/:id/rotate', operatorClose: '/operator/rooms/:id/close',
   },
 } as const;
 
@@ -59,9 +64,20 @@ export type ErrorResponse = z.infer<typeof ErrorResponse>;
 export const PublicConfig = z.object({ createRequiresKey: z.boolean(), createEnabled: z.boolean(), ttlSeconds: z.number().int().positive() });
 export type PublicConfig = z.infer<typeof PublicConfig>;
 
+/**
+ * POST /rooms (permanent room): same body and response as /rooms/anonymous, with `kind: 'permanent'` and `expiresAt: null`.
+ * Operator routes (/operator/...) authenticate with HEADERS.create and share its wrong-key limiter: a cleared browser must never orphan a permanent room.
+ */
+export const OperatorRoomsResponse = z.object({
+  rooms: z.array(z.object({ roomId: z.string(), topic: z.string(), closed: z.boolean(), lastSeq: z.number().int(), activeParticipants: z.number().int() })),
+});
+export type OperatorRoomsResponse = z.infer<typeof OperatorRoomsResponse>;
+export const RotateSecretsResponse = z.object({ inviteSecret: z.string(), viewSecret: z.string(), adminSecret: z.string() });
+export type RotateSecretsResponse = z.infer<typeof RotateSecretsResponse>;
+
 /** GET /rooms/:id. Header accepted: exactly one of HEADERS.invite | view | admin (any of the three). */
 export const RoomPublicInfo = z.object({
-  roomId: z.string(), topic: z.string(), expiresAt: z.number().int(), participants: z.array(ParticipantInfo), paused: z.boolean(), closed: z.boolean(),
+  roomId: z.string(), kind: RoomKind.default('anonymous'), topic: z.string(), expiresAt: z.number().int().nullable(), participants: z.array(ParticipantInfo), paused: z.boolean(), closed: z.boolean(),
 });
 export type RoomPublicInfo = z.infer<typeof RoomPublicInfo>;
 

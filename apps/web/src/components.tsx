@@ -55,6 +55,8 @@ export function formatRemaining(ms: number) {
   return `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
 }
 
+export const PermanentBadge = () => <span data-testid="permanent" className="rounded bg-blue-100 px-1 font-semibold text-blue-900">Permanent room</span>;
+
 export function Countdown({ expiresAt }: { expiresAt: number }) {
   const now = useNow();
   return <span data-testid="countdown">Expires in {formatRemaining(expiresAt - now)}</span>;
@@ -76,13 +78,13 @@ export function SafetyNotice() {
   );
 }
 
-export function Transcript({ state }: { state: RoomState }) {
+export function Transcript({ state, onErase }: { state: RoomState; onErase?: (seq: number) => void }) {
   const names = new Map(state.participants.map((p) => [p.participantId, p.displayName]));
   return (
     <ol aria-live="polite" aria-label="Transcript" className="space-y-2">
       {state.messages.length === 0 && <li className="text-slate-600">No messages yet.</li>}
       {state.messages.map((m) => (
-        <MessageRow key={m.seq} m={m} seen={Object.entries(state.receipts[m.seq] ?? {}).map(([pid, at]) => ({ name: names.get(pid) ?? 'participant', at }))} />
+        <MessageRow key={m.seq} m={m} onErase={onErase} seen={Object.entries(state.receipts[m.seq] ?? {}).map(([pid, at]) => ({ name: names.get(pid) ?? 'participant', at }))} />
       ))}
     </ol>
   );
@@ -91,7 +93,7 @@ export function Transcript({ state }: { state: RoomState }) {
 // Human vs agent is decided by the server-provided `kind` only; vendor is shown as self-declared.
 const KIND_STYLE = { human: 'border-green-700 bg-green-50', agent: 'border-slate-400 bg-white', system: 'border-slate-300 bg-slate-100 italic' } as const;
 
-function MessageRow({ m, seen }: { m: DeliveredMessage; seen: { name: string; at: number }[] }) {
+function MessageRow({ m, seen, onErase }: { m: DeliveredMessage; seen: { name: string; at: number }[]; onErase?: (seq: number) => void }) {
   const { kind, displayName, vendor } = m.from;
   return (
     <li className={`rounded border-l-4 p-2 ${KIND_STYLE[kind]}`} data-kind={kind}>
@@ -101,6 +103,11 @@ function MessageRow({ m, seen }: { m: DeliveredMessage; seen: { name: string; at
         {vendor && <span> (declared: {clean(vendor)})</span>} <time>{hhmm(m.ts)}</time>
       </div>
       <div className="whitespace-pre-wrap break-words">{m.content === null || m.deletedAt !== undefined ? '[deleted]' : clean(m.content)}</div>
+      {onErase && m.content !== null && m.deletedAt === undefined && (
+        <button type="button" className={btn} aria-label={`Erase message ${m.seq}`} onClick={() => onErase(m.seq)}>
+          Erase
+        </button>
+      )}
       {seen.length > 0 && (
         <div className="text-xs text-slate-600">{seen.map((s) => `seen by ${clean(s.name)} at ${hhmm(s.at)}`).join(', ')}</div>
       )}

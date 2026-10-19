@@ -62,6 +62,7 @@ describe('routes', () => {
     expect(WsTicketResponse.safeParse({ ticket, role: 'viewer', expiresInSeconds: 30 }).success).toBe(true);
     expect(WsTicketResponse.safeParse({ ticket, role: 'root', expiresInSeconds: 30 }).success).toBe(false);
     expect(RoomPublicInfo.safeParse({ roomId: id, topic: '', expiresAt: 1, participants: [], paused: false, closed: false }).success).toBe(true);
+    expect(RoomPublicInfo.safeParse({ roomId: id, kind: 'permanent', topic: '', expiresAt: null, participants: [], paused: false, closed: false }).success).toBe(true);
     expect(RoomPublicInfo.safeParse({ roomId: id }).success).toBe(false);
     expect(MessagesResponse.safeParse({ messages: [], hasMore: false }).success).toBe(true);
     expect(ServerEvent.safeParse({ type: 'error', code: 'forbidden_role', message: 'viewers cannot send' }).success).toBe(true);

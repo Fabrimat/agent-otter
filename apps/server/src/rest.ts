@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import {
   AdminAction, CreateRoomRequest, HEADERS, JoinRequest, LIMITS, MessagesQuery, ROOM_ID, ROUTES, buildSnippets,
-  type JoinResponse, type MessagesResponse, type PublicConfig, type WsTicketResponse,
+  type JoinResponse, type MessagesResponse, type OperatorRoomsResponse, type PublicConfig, type RotateSecretsResponse, type WsTicketResponse,
 } from '@agent-office/protocol';
 import type { z } from 'zod/v4';
 import type { Config } from './config.js';
@@ -42,6 +42,28 @@ export function createRest(d: { store: RoomStore; log: Logger; cfg: Config; crea
     throw new StoreError('bad_secret', 'missing or wrong secret');
   }
 
+  /** x-create-key check. Brute-force guard: an IP with too many wrong keys is refused WITHOUT comparing, so even the right key waits out the window. */
+  function requireKey(req: IncomingMessage) {
+    const ip = clientIp(req, cfg.trustProxy);
+    if (d.keyFailLimiter.full(ip)) {
+      log.warn({ evt: 'rate_limited', kind: 'create_key', ip });
+      throw new StoreError('rate_limited', 'too many wrong create keys, try again later');
+    }
+    const k = req.headers[HEADERS.create];
+    if (typeof k !== 'string' || !sameSecret(cfg.createKey!, k)) {
+      d.keyFailLimiter.hit(ip);
+      log.warn({ evt: 'create_forbidden', ip }); // normalised IP, never the submitted key
+      throw new StoreError('create_forbidden', 'a valid create key is required to create a room');
+    }
+  }
+  /** Permanent rooms and the operator surface need BOTH a CREATE_KEY and a database. */
+  function requireOperator(req: IncomingMessage) {
+    // key first: an unauthenticated caller must not learn whether persistence is configured (no CREATE_KEY at all is public via /config)
+    if (!cfg.createKey) throw new StoreError('create_disabled', 'permanent rooms need CREATE_KEY and DATABASE_URL on this server');
+    requireKey(req);
+    if (!cfg.databaseUrl) throw new StoreError('create_disabled', 'permanent rooms need CREATE_KEY and DATABASE_URL on this server');
+  }
+
   const routes: [string, RegExp, Handler][] = [
     ['GET', compile(ROUTES.config), async ({ res }) => {
       const out: PublicConfig = { createRequiresKey: !!cfg.createKey, createEnabled: cfg.createRooms, ttlSeconds: cfg.roomTtlSeconds };
@@ -49,28 +71,40 @@ export function createRest(d: { store: RoomStore; log: Logger; cfg: Config; crea
     }],
     ['POST', compile(ROUTES.createRoom), async ({ req, res }) => {
       if (!cfg.createRooms) throw new StoreError('create_disabled', 'room creation is switched off on this server');
-      let keyed = false; // a valid CREATE_KEY holder is trusted: the per-IP room limit (shared by a whole office behind one proxy IP) does not apply
-      if (cfg.createKey) {
-        // brute-force guard: an IP with too many wrong keys is refused WITHOUT comparing, so even the right key waits out the window
-        const ip = clientIp(req, cfg.trustProxy);
-        if (d.keyFailLimiter.full(ip)) {
-          log.warn({ evt: 'rate_limited', kind: 'create_key', ip });
-          throw new StoreError('rate_limited', 'too many wrong create keys, try again later');
-        }
-        const k = req.headers[HEADERS.create];
-        if (typeof k !== 'string' || !sameSecret(cfg.createKey, k)) {
-          d.keyFailLimiter.hit(ip);
-          log.warn({ evt: 'create_forbidden', ip }); // normalised IP, never the submitted key
-          throw new StoreError('create_forbidden', 'a valid create key is required to create a room');
-        }
-        keyed = true;
-      }
-      if (!keyed && !d.createLimiter.hit(clientIp(req, cfg.trustProxy))) {
+      // a valid CREATE_KEY holder is trusted: the per-IP room limit (shared by a whole office behind one proxy IP) does not apply
+      if (cfg.createKey) requireKey(req);
+      else if (!d.createLimiter.hit(clientIp(req, cfg.trustProxy))) {
         log.warn({ evt: 'rate_limited', kind: 'room_create' });
         throw new StoreError('rate_limited', `room creation limit reached (${cfg.roomsPerIpPerHour} per hour)`);
       }
       const { topic } = parse(CreateRoomRequest, await body(req));
       send(res, 200, await store.createRoom(topic ?? ''));
+    }],
+    ['POST', compile(ROUTES.createPermanentRoom), async ({ req, res }) => {
+      if (!cfg.createRooms) throw new StoreError('create_disabled', 'room creation is switched off on this server');
+      requireOperator(req);
+      const { topic } = parse(CreateRoomRequest, await body(req));
+      const out = await store.createRoom(topic ?? '', 'permanent');
+      log.info({ evt: 'room_created', kind: 'permanent', roomId: out.roomId });
+      send(res, 200, out);
+    }],
+    ['GET', compile(ROUTES.operatorRooms), async ({ req, res }) => {
+      requireOperator(req);
+      const out: OperatorRoomsResponse = { rooms: store.permanentRooms() };
+      send(res, 200, out);
+    }],
+    ['POST', compile(P.operatorRotate), async (c) => {
+      requireOperator(c.req);
+      const s = await store.rotateSecrets(c.params.id!);
+      log.info({ evt: 'operator', action: 'rotate', roomId: c.params.id });
+      const out: RotateSecretsResponse = { inviteSecret: s.invite, viewSecret: s.view, adminSecret: s.admin };
+      send(c.res, 200, out);
+    }],
+    ['POST', compile(P.operatorClose), async (c) => {
+      requireOperator(c.req);
+      await store.admin(c.params.id!, { action: 'close' });
+      log.info({ evt: 'operator', action: 'close', roomId: c.params.id });
+      send(c.res, 200, { ok: true });
     }],
     ['GET', compile(P.room), async (c) => {
       await auth(c, ['invite', 'view', 'admin']);
@@ -85,9 +119,10 @@ export function createRest(d: { store: RoomStore; log: Logger; cfg: Config; crea
         throw new StoreError('bad_secret', 'missing or wrong secret');
       }
       const j = await store.join(id, { displayName: b.displayName, vendor: b.vendor });
+      const { snippets: { pathFallbackUrl, ...snippets }, note } = buildSnippets(cfg.publicUrl, j.token);
       const out: JoinResponse = {
         participantId: j.participantId, token: j.token, displayName: j.displayName, vendor: j.vendor, cursorStartsAt: j.cursorStartsAt,
-        ...buildSnippets(cfg.publicUrl, j.token),
+        snippets: j.kind === 'permanent' ? snippets : { ...snippets, pathFallbackUrl }, note, // permanent tokens never go in URLs (T-04)
       };
       send(c.res, 200, out);
     }],
@@ -100,6 +135,8 @@ export function createRest(d: { store: RoomStore; log: Logger; cfg: Config; crea
       send(c.res, 200, out);
     }],
     ['GET', compile(P.messages), async (c) => {
+      // admin and view secret holders read EVERYTHING (no since_join clamp): they are the room's owner and its read-only transcript link,
+      // not participants. Closed permanent rooms stay readable here.
       const role = await auth(c, ['admin', 'view']);
       const q = parse(MessagesQuery, Object.fromEntries(c.url.searchParams));
       const page = await store.list(c.params.id!, { before: q.beforeSeq, limit: q.limit ?? LIMITS.historyLimitMax, maxBytes: 256 * 1024 });

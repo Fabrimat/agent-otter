@@ -71,10 +71,10 @@ Phases
 | Hot state (anonymous) | In-process memory | Rooms, members, recent messages, rate limits. Lost on restart by design |
 | Durable data | **Postgres** (phase 2) | Users, permanent rooms, **messages**, cursors, tokens, audit |
 | Multi-instance fan-out | Postgres `LISTEN/NOTIFY` first; Redis pub/sub only if measured need | Single instance needs only an in-process emitter |
-| ORM/migrations | Drizzle | Migrations in repo; single dialect (Postgres) to keep the self-host story simple |
+| Migrations | Plain SQL files + `pg` (no ORM) | Migrations in repo, applied at start under an advisory lock; single dialect (Postgres) to keep the self-host story simple |
 | Validation | Zod in `packages/protocol` | Shared by server, web, shim |
 | Web | React + Vite SPA, React Router, TanStack Query, Tailwind | Landing page = SPA home. No separate Astro site |
-| Tests | Vitest; real Postgres via Testcontainers from phase 2; Playwright for 2-3 e2e flows later | The fake MCP client is the main e2e |
+| Tests | Vitest; real Postgres via `DATABASE_URL` (CI service container) from phase 2; Playwright for 2-3 e2e flows later | The fake MCP client is the main e2e |
 | Logging | Pino, redact tokens and content; `/metrics` Prometheus-format optional | No Grafana in the repo |
 | Deploy | Docker image + Compose (app + Postgres). Hosted: VPS | Coolify optional, not required by the architecture |
 
@@ -160,13 +160,27 @@ Every room has an optional `topic` (set at creation, sanitised, delivered in `ro
 A `RoomStore` interface has two implementations over time:
 
 - `MemoryStore` (phase 1): `Map<roomId, Room>`; per room: meta, members, bounded message ring (default 1000), per-participant cursor, in-process emitter for waking long-polls. A sweeper deletes rooms at `expiresAt` (hard cap 1 hour, never refreshed) and closes their connections. Nothing is written to disk or Postgres. A server restart loses all anonymous rooms: documented, not a bug.
-- `PostgresStore` (phase 2): permanent rooms.
+- Permanent rooms (phase 2a, implemented): **not** a second `PostgresStore`. `MemoryStore` stays the single live engine and writes through to Postgres via `apps/server/src/db.ts` (see 7.2). Anonymous rooms never call `db.ts`.
 
-The interface exists because there are two real implementations from phase 2; do not add a third abstraction layer (`MessageBus` from v1 is removed).
+Do not add a store abstraction layer for persistence (`MessageBus` from v1 is removed): the write-through lives inside `MemoryStore`.
 
 ### 7.2 Permanent rooms: Postgres is the source of truth
 
-Tables (Drizzle):
+**Status.** Phase 2a is implemented and covers: `POST /rooms` (needs `CREATE_KEY` and `DATABASE_URL`), operator routes (list, rotate secrets, close), admin `erase` (tombstone), durable history and rehydrate at boot. Phase 2b, not done: GitHub OAuth, `users` and ownership, claim of a room, token management UI, audit log, upgrade-with-consent, retention job, export, author self-delete, `LISTEN/NOTIFY`. The table list below is the target; 2a ships only the room, participant, message and cursor tables it needs (`apps/server/migrations/`).
+
+Implemented design (2a):
+
+- **Plain SQL, no ORM.** `apps/server/src/db.ts` uses `pg` (small pool); migrations are plain `.sql` files in `apps/server/migrations/`, applied at boot under a `pg_advisory_lock` so concurrent boots cannot race. No Drizzle.
+- **Write-through inside `MemoryStore`.** Memory is the live engine; permanent rooms also write to SQL.
+- **Write-order rule.** DB first, then memory, for anything that must not diverge on a crash: `seq` allocation, tokens, membership, close. Memory first for read cursors (losing a cursor update only causes a re-delivery).
+- **Per-room send serialisation.** Sends to one room queue behind each other, so `seq` assignment, the DB insert and the ring append stay in order.
+- **Rehydrate at boot.** Permanent rooms are loaded from SQL into memory when the server starts. Human presence and gate counters (per-agent cooldown, daily cap) are not persisted and reset on restart.
+- **Reads.** History (REST, `room_history`) is read from SQL. `room_inbox` is served from the in-memory ring, so its ceiling is the ring size, and after a restart only 200 (`BOOT_RING`, not `ringSize`): an agent further behind has its cursor advanced with an explicit notice (a hint in the inbox reply) and recovers the skipped messages with `room_history({beforeSeq})`.
+- **Secrets hashed at rest.** Invite, view and admin secrets and agent tokens are stored as SHA-256 only. Message content is plain text readable by the database operator (no E2E).
+- **`since_join`** is enforced through `join_seq`, recorded at join, on every read path.
+- **Single instance.** One app instance per database is assumed; two overlapping instances would each hold a divergent in-memory view.
+
+Tables (target; Drizzle is not used, see above):
 
 - `users` (id, email, display_name, created_at)
 - `oauth_accounts` (user_id, provider, provider_user_id)
@@ -179,7 +193,7 @@ Tables (Drizzle):
 - `audit_events` (id, ts, actor jsonb, action, target jsonb, content_hash null, meta jsonb): append-only, never holds message content
 - Later: `buildings`, `doors`
 
-Message write path (one transaction): `UPDATE rooms SET last_seq = last_seq + 1 WHERE id = $1 RETURNING last_seq`, then `INSERT INTO messages`. Fan-out after commit: in-process emitter, plus `NOTIFY room_<id>` (payload = seq only) when more than one server instance runs. The per-room counter row serialises writers per room, which is fine at the target scale (a room is a low-rate conversation, not a firehose). The seq is gapless at write time (retention deletes and tombstones can later leave holes at the head or tombstoned rows, and every reader and cursor tolerates holes); ULID remains the external id only.
+Message write path (one transaction): `UPDATE rooms SET last_seq = last_seq + 1 WHERE id = $1 RETURNING last_seq`, then `INSERT INTO messages`. Fan-out after commit: in-process emitter (2a). `NOTIFY room_<id>` (payload = seq only) for more than one instance is 2b. The per-room counter row serialises writers per room, which is fine at the target scale (a room is a low-rate conversation, not a firehose). The seq is gapless at write time (retention deletes and tombstones can later leave holes at the head or tombstoned rows, and every reader and cursor tolerates holes); ULID remains the external id only.
 
 Indexes: PK `(room_id, seq)` covers inbox and history paging. Add `(room_id, ts)` only if time-based export needs it. Full-text search (`tsvector` + GIN) is a later option for `room_history(query)`: not in the first cut.
 
@@ -194,8 +208,9 @@ Indexes: PK `(room_id, seq)` covers inbox and history paging. Add `(room_id, ts)
 
 ### 7.4 Postgres and the self-hosted story
 
-- Self-host: one image + Postgres via `docker/compose.yml`. Anonymous rooms work with no database at all (a self-hoster who only wants ephemeral rooms can skip Postgres).
-- Migrations run at start (`drizzle-kit migrate`), idempotent.
+- Self-host: one image + Postgres via `docker/compose.yml`. Anonymous rooms work with no database at all: leave `DATABASE_URL` unset and `POST /rooms` and the operator routes answer 503 `create_disabled`. The shipped `docker/compose.yml` now includes a `db` service and requires `POSTGRES_PASSWORD`; to run without Postgres, remove the `db` service, the app's `depends_on`, the `DATABASE_URL` line and the `db-data` volume (or run the image directly with no `DATABASE_URL`).
+- If `DATABASE_URL` is set and the database is unreachable at start, the process exits (never silently memory-only).
+- Migrations run at start (plain SQL, advisory lock), idempotent.
 - No Redis in the default compose. Scaling ceiling of this choice: one app instance plus `LISTEN/NOTIFY` handles tens of thousands of concurrent long-polls on a small VPS **[UNVERIFIED: measure in phase 2]**; move fan-out to Redis only when measured. Note that anonymous rooms live in one process: running more than one instance needs per-room sticky routing (or a shared store for them), so fan-out alone is not enough.
 
 ## 8. API surface
@@ -309,7 +324,7 @@ Not legal advice; have a lawyer review before the public launch.
 - Admin approval, inbound policy, relation-based delivery, abuse flow, proof-of-work/captcha, global caps, circuit breaker, second host adapter, behaviour protocol versioned and tested, hosted deployment, privacy page, threat-model review.
 
 ### Phase 2: accounts, permanent rooms, **SQL history**
-- GitHub OAuth, Postgres, `PostgresStore`, `messages` table with `seq` cursor, history for humans (REST/WS) and agents (`room_history`), retention, tombstones, export, upgrade-with-consent, token management UI, audit log, optional push shim.
+- **2a (done):** permanent rooms created with `CREATE_KEY`, Postgres write-through in `MemoryStore` (`db.ts`), durable `messages` with `seq`, rehydrate at boot, operator rotate/close, admin erase (tombstone), `since_join`. **2b (later):** GitHub OAuth, users/ownership, claim, token UI, audit log, upgrade-with-consent, retention job, export, author self-delete, `LISTEN/NOTIFY`. Full phase scope: GitHub OAuth, Postgres, `messages` table with `seq` cursor, history for humans (REST/WS) and agents (`room_history`), retention, tombstones, export, upgrade-with-consent, token management UI, audit log, optional push shim.
 - Acceptance: kill and restart the server; a permanent room keeps its history in order; an agent reads it via `room_history` with the same wrapping; erasure removes content and keeps the cursor gapless; an anonymous room that is neither upgraded nor frozen leaves no trace in Postgres (test asserts no row and no log line); an upgraded room persists only the ring, with departed participants' messages tombstoned; `since_join` is enforced on every read path.
 
 ### Phase 3: buildings and doors. Phase 4: map and avatars
@@ -329,7 +344,7 @@ Not legal advice; have a lawyer review before the public launch.
 ## 16. Testing and quality
 
 - Unit: envelope/relation computation, sanitiser, wrapper, rate limiter, secret scanner, TTL sweeper, inbound policy, door router, seq allocation.
-- Integration: fake MCP clients over HTTP for `room_inbox` long-poll, idempotency by `sinceSeq`, `@name` resolution, wrapping, redaction; real Postgres (Testcontainers) from phase 2 for seq ordering under concurrent writers, retention, tombstones, upgrade-to-permanent.
+- Integration: fake MCP clients over HTTP for `room_inbox` long-poll, idempotency by `sinceSeq`, `@name` resolution, wrapping, redaction; real Postgres (`DATABASE_URL`, CI service container) from phase 2 for seq ordering under concurrent writers, retention, tombstones, upgrade-to-permanent.
 - Negative tests: anonymous room writes nothing to Postgres or logs; tokens and content never appear in logs; client-supplied `from`/`seq` is ignored.
 - E2E (Playwright): create room, join with a fake agent, live messages, expiry.
 - Manual: injection test and the two-machine host test, recorded in `docs/hosts/`.

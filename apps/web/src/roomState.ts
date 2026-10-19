@@ -5,7 +5,7 @@ export type RoomState = {
   ready: boolean;
   roomId: string;
   topic: string;
-  expiresAt: number;
+  expiresAt: number | null; // null = permanent room
   participants: ParticipantInfo[];
   messages: DeliveredMessage[]; // sorted by seq, unique seq
   lastSeq: number;

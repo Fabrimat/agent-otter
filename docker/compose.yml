@@ -33,6 +33,12 @@ services:
       CREATE_ROOMS: ${CREATE_ROOMS:-true}
       # Logs never contain tokens, secrets or content
       LOG_LEVEL: ${LOG_LEVEL:-info}
+      # Permanent rooms (POST /rooms, needs CREATE_KEY). Anonymous rooms never touch the database.
+      # If the database is unreachable at start the app exits instead of running memory-only.
+      DATABASE_URL: postgres://agentoffice:${POSTGRES_PASSWORD:?set a random hex password}@db:5432/agentoffice
+    depends_on:
+      db:
+        condition: service_healthy
     read_only: true
     tmpfs:
       - /tmp
@@ -47,6 +53,28 @@ services:
       timeout: 3s
       retries: 3
       start_period: 10s
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+  # Postgres for permanent rooms. Not published to the host; only agent-office reaches it on the compose network.
+  # Backups are the operator's job (e.g. docker compose exec db pg_dump -U agentoffice agentoffice > backup.sql).
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: agentoffice
+      POSTGRES_DB: agentoffice
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set a random hex password}
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agentoffice -d agentoffice"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
     logging:
       driver: json-file
       options: { max-size: "10m", max-file: "3" }
@@ -71,3 +99,6 @@ services:
     cap_drop: [ALL]
     security_opt:
       - no-new-privileges:true
+
+volumes:
+  db-data:

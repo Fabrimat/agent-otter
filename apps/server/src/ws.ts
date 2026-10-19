@@ -109,6 +109,7 @@ export function attachWs(server: Server, d: { store: RoomStore; log: Logger; now
       unsub = store.subscribe(roomId, (e) => (initialised ? forward(e) : queue.push(e)));
       const info = await store.getRoom(roomId);
       if (!info) throw new StoreError('room_not_found', 'room not found');
+      // no participantId: admin and viewer sockets see the whole history (no since_join clamp, same as REST); permanent rooms read SQL here
       let page = await store.list(roomId, lastSeq === undefined ? { limit: INIT_MESSAGES } : { after: lastSeq, limit: RESUME_MESSAGES });
       // Gap larger than one resume batch: send the NEWEST batch instead of silently skipping the middle. The init event has no `truncated`
       // flag in the protocol; the client sees the gap because messages[0].seq > its lastSeq + 1.

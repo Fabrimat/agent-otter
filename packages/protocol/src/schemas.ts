@@ -92,12 +92,15 @@ export type ErrorCode = z.infer<typeof ErrorCode>;
 // ---- REST (strict: clients cannot smuggle server-owned fields) ----
 export const CreateRoomRequest = z.strictObject({ topic: z.string().max(LIMITS.topicChars).optional() });
 export type CreateRoomRequest = z.infer<typeof CreateRoomRequest>;
+export const RoomKind = z.enum(['anonymous', 'permanent']);
+export type RoomKind = z.infer<typeof RoomKind>;
 export const CreateRoomResponse = z.object({
   roomId: z.string(),
+  kind: RoomKind.default('anonymous'), // additive: older clients and fixtures without it mean anonymous
   inviteSecret: z.string(),
   adminSecret: z.string(),
   viewSecret: z.string(), // read-only transcript link secret
-  expiresAt: z.number().int(),
+  expiresAt: z.number().int().nullable(), // null: permanent rooms never expire
 });
 export type CreateRoomResponse = z.infer<typeof CreateRoomResponse>;
 
@@ -119,7 +122,7 @@ export const JoinResponse = z.object({
     codexConfigToml: z.string(),
     codexEnv: z.string(),
     codexPowerShell: z.string(),
-    pathFallbackUrl: z.string(),
+    pathFallbackUrl: z.string().optional(), // absent for permanent rooms: their tokens never go in URLs (THREAT-MODEL T-04)
   }),
   note: z.string(),
 });
@@ -130,12 +133,13 @@ export const AdminAction = z.discriminatedUnion('action', [
   z.strictObject({ action: z.literal('kick'), participantId: z.string() }),
   z.strictObject({ action: z.literal('close') }),
   z.strictObject({ action: z.literal('pause'), paused: z.boolean().default(true) }),
+  z.strictObject({ action: z.literal('erase'), seq: z.number().int().min(1) }), // tombstone one message: content gone, seq kept
 ]);
 export type AdminAction = z.infer<typeof AdminAction>;
 
 // ---- WebSocket ----
 export const ServerEvent = z.discriminatedUnion('type', [
-  z.object({ type: z.literal('init'), roomId: z.string(), topic: z.string(), expiresAt: z.number().int(), participants: z.array(ParticipantInfo), messages: z.array(DeliveredMessage), lastSeq: Seq }),
+  z.object({ type: z.literal('init'), roomId: z.string(), topic: z.string(), expiresAt: z.number().int().nullable(), participants: z.array(ParticipantInfo), messages: z.array(DeliveredMessage), lastSeq: Seq }),
   z.object({ type: z.literal('message'), message: DeliveredMessage }),
   z.object({ type: z.literal('participants'), participants: z.array(ParticipantInfo) }),
   z.object({ type: z.literal('receipt'), participantId: z.string(), seqs: z.array(Seq), at: z.number().int() }),

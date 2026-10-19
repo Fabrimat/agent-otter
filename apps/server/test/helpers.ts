@@ -1,4 +1,6 @@
+import { randomBytes } from 'node:crypto';
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
+import pg from 'pg';
 import { ROUTES, type CreateRoomResponse, type JoinResponse, type ServerEvent, type WsTicketResponse } from '@agent-office/protocol';
 import { WebSocket } from 'ws';
 import { createApp, type AppOptions } from '../src/app.js';
@@ -29,8 +31,25 @@ export async function boot(o: { cfg?: Partial<Config>; app?: Partial<AppOptions>
     return { status: r.status, json, text, headers: r.headers };
   };
 
-  async function mkRoom(topic = 'topic') {
-    const created = await api('POST', ROUTES.createRoom, { body: { topic } });
+  /** MCP client for a token (bearer header or the /mcp/<token> path). */
+  async function agent(token: string, via: 'bearer' | 'path' = 'bearer') {
+    const transport = new StreamableHTTPClientTransport(
+      new URL(via === 'path' ? url + ROUTES.mcpFallback(token) : url + ROUTES.mcp),
+      via === 'bearer' ? { requestInit: { headers: { Authorization: `Bearer ${token}` } } } : undefined,
+    );
+    const client = new Client({ name: 'fake', version: '0' });
+    await client.connect(transport);
+    clients.push(client);
+    const raw = async (name: string, args: Record<string, unknown> = {}) => (await client.callTool({ name, arguments: args })) as { content: { text: string }[]; isError?: boolean };
+    const call = async (name: string, args: Record<string, unknown> = {}) => (await raw(name, args)).content[0]!.text;
+    return { client, call, raw };
+  }
+
+  /** `permanent`: POST /rooms with cfg.createKey (needs cfg.databaseUrl). */
+  async function mkRoom(topic = 'topic', kind: 'anonymous' | 'permanent' = 'anonymous') {
+    const created = kind === 'permanent'
+      ? await api('POST', ROUTES.createPermanentRoom, { body: { topic }, headers: { 'x-create-key': cfg.createKey ?? '' } })
+      : await api('POST', ROUTES.createRoom, { body: { topic } });
     const room = created.json as CreateRoomResponse;
     const admin = { 'x-admin-secret': room.adminSecret };
     const view = { 'x-view-secret': room.viewSecret };
@@ -39,16 +58,7 @@ export async function boot(o: { cfg?: Partial<Config>; app?: Partial<AppOptions>
     const join = async (displayName: string, vendor = 'other', via: 'bearer' | 'path' = 'bearer') => {
       const r = await api('POST', ROUTES.join(room.roomId), { body: { inviteSecret: room.inviteSecret, displayName, vendor } });
       const j = r.json as JoinResponse;
-      const transport = new StreamableHTTPClientTransport(
-        new URL(via === 'path' ? url + ROUTES.mcpFallback(j.token) : url + ROUTES.mcp),
-        via === 'bearer' ? { requestInit: { headers: { Authorization: `Bearer ${j.token}` } } } : undefined,
-      );
-      const client = new Client({ name: 'fake', version: '0' });
-      await client.connect(transport);
-      clients.push(client);
-      const raw = async (name: string, args: Record<string, unknown> = {}) => (await client.callTool({ name, arguments: args })) as { content: { text: string }[]; isError?: boolean };
-      const call = async (name: string, args: Record<string, unknown> = {}) => (await raw(name, args)).content[0]!.text;
-      return { ...j, client, call, raw };
+      return { ...j, ...(await agent(j.token, via)) };
     };
 
     /** Opens a browser-like socket. Events are collected; `until` waits for one. */
@@ -81,11 +91,32 @@ export async function boot(o: { cfg?: Partial<Config>; app?: Partial<AppOptions>
   }
 
   return {
-    url, clock, logs, app, api, mkRoom,
+    url, clock, logs, app, api, mkRoom, agent,
     async close() {
       for (const w of sockets) w.terminate();
       await Promise.all(clients.map((c) => c.close().catch(() => {})));
       await app.close();
+    },
+  };
+}
+
+/** Real Postgres for persistence tests (DATABASE_URL): a fresh schema per call via search_path, so parallel test files never share tables. */
+export async function freshDb() {
+  const base = process.env.DATABASE_URL!;
+  const schema = 't_' + randomBytes(6).toString('hex');
+  const admin = new pg.Client({ connectionString: base });
+  await admin.connect();
+  await admin.query(`CREATE SCHEMA ${schema}`);
+  await admin.end();
+  const u = new URL(base);
+  u.searchParams.set('options', `-c search_path=${schema}`);
+  const pool = new pg.Pool({ connectionString: u.toString(), max: 2 });
+  return {
+    url: u.toString(),
+    sql: async (q: string, p: unknown[] = []) => (await pool.query(q, p)).rows as any[],
+    async drop() {
+      await pool.query(`DROP SCHEMA ${schema} CASCADE`).catch(() => {});
+      await pool.end();
     },
   };
 }

@@ -20,10 +20,14 @@ export function Home() {
   const [topic, setTopic] = useState('');
   const [key, setKey] = useState(() => sessionStorage.getItem(KEY) ?? '');
   const config = useQuery({ queryKey: ['config'], queryFn: api.config, retry: false });
-  const needsKey = config.data?.createRequiresKey === true;
-  const disabled = config.data?.createEnabled === false;
+  const [permanent, setPermanent] = useState(false);
+  const needsKey = config.data?.createRequiresKey === true || permanent; // permanent rooms always need the key
+  const disabled = !permanent && config.data?.createEnabled === false; // for permanent, the server decides (create_disabled without a database)
   const create = useMutation({
-    mutationFn: () => api.createRoom(topic.trim() ? { topic: topic.trim() } : {}, needsKey ? key.trim() : undefined),
+    mutationFn: () => {
+      const body = topic.trim() ? { topic: topic.trim() } : {};
+      return permanent ? api.createPermanentRoom(body, key.trim()) : api.createRoom(body, needsKey ? key.trim() : undefined);
+    },
     onSuccess: ({ roomId, adminSecret, inviteSecret, viewSecret, expiresAt }) => {
       saveRoom({ roomId, adminSecret, inviteSecret, viewSecret, expiresAt });
       nav(`/r#${roomId}`, { replace: true }); // no secret in the URL or history; the admin page restores from localStorage
@@ -42,6 +46,10 @@ export function Home() {
         <label className="block">
           <span className="font-semibold">Topic (optional)</span>
           <input className={input} value={topic} maxLength={LIMITS.topicChars} onChange={(e) => setTopic(e.target.value)} />
+        </label>
+        <label className="flex items-center gap-2">
+          <input type="checkbox" checked={permanent} onChange={(e) => setPermanent(e.target.checked)} />
+          <span>Permanent room (never expires, kept in the database, needs the key below)</span>
         </label>
         {needsKey && (
           <label className="block">
@@ -124,6 +132,7 @@ function AdminRoomLive({ room }: { room: StoredRoom }) {
           viewLink: `${origin}/view#${room.roomId}.${room.viewSecret}`,
           onAction: (a) => act.mutate(a),
           onSend: send,
+          ready: state.ready,
           actionError,
         }}
       />
@@ -176,7 +185,7 @@ function JoinForm({ roomId, inviteSecret }: { roomId: string; inviteSecret: stri
       ['Codex: config.toml', s.codexConfigToml],
       ['Codex: environment (bash)', s.codexEnv],
       ['Codex: environment (PowerShell)', s.codexPowerShell],
-      ['Fallback MCP URL (contains your token; prefer the header form)', s.pathFallbackUrl],
+      ...(s.pathFallbackUrl ? [['Fallback MCP URL (contains your token; prefer the header form)', s.pathFallbackUrl] as [string, string]] : []), // absent for permanent rooms
     ];
     return (
       <Page title="Connect your agent">

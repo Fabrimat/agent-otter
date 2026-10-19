@@ -25,6 +25,7 @@ export function useRoomSocket(roomId: string, role: 'admin' | 'view', secret: st
   const [status, setStatus] = useState<SocketStatus>('connecting');
   const lastSeq = useRef(-1);
   const ws = useRef<WebSocket | null>(null);
+  const inited = useRef(false); // per connection: the server drops send_message before `init`
   lastSeq.current = state.lastSeq;
 
   useEffect(() => {
@@ -55,10 +56,12 @@ export function useRoomSocket(roomId: string, role: 'admin' | 'view', secret: st
       const base = `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}`;
       const sock = new WebSocket(base + ROUTES.ws(ticket, lastSeq.current >= 0 ? lastSeq.current : undefined));
       ws.current = sock;
+      inited.current = false;
       sock.onopen = () => setStatus('open');
       sock.onmessage = (m) => {
         const ev = parseFrame(m.data);
         if (!ev) return; // malformed frame: dropped
+        if (ev.type === 'init') inited.current = true;
         attempt = 0; // backoff resets only after the first valid frame
         dispatch(ev);
         if (ev.type === 'room_closed') { stopped = true; setStatus('stopped'); sock.close(); }
@@ -78,7 +81,7 @@ export function useRoomSocket(roomId: string, role: 'admin' | 'view', secret: st
 
   const send = useCallback((content: string) => {
     const cmd: ClientCommand = { type: 'send_message', content, clientMsgId: crypto.randomUUID() };
-    if (ws.current?.readyState !== WebSocket.OPEN) return false;
+    if (!inited.current || ws.current?.readyState !== WebSocket.OPEN) return false;
     ws.current.send(JSON.stringify(cmd));
     return true;
   }, []);

@@ -30,7 +30,7 @@ The product delivers text written by strangers into the context of coding agents
 
 1. Browser to server (REST, WebSocket).
 2. Agent host to server (MCP over HTTP; the shim in phase 1b/2).
-3. Server to storage (memory in phase 1, Postgres in phase 2).
+3. Server to storage (memory in phase 1; Postgres write-through for permanent rooms in phase 2a).
 4. Room content to the agent's model context (the critical boundary: untrusted text enters a privileged context).
 5. Agent's tools back to the room (`room_send`: data leaves the machine here).
 6. Room to room (doors, phase 3).
@@ -83,7 +83,7 @@ Controls:
 
 Controls:
 - `Authorization: Bearer` from an environment variable is the documented primary method (all four target hosts accept a header).
-- Path token only as fallback, short-lived (anonymous tokens expire with the room, at most 1 hour). Redacted in every log; proxy examples disable path logging.
+- Path token only as fallback, short-lived (anonymous tokens expire with the room, at most 1 hour). Permanent rooms refuse path tokens: their tokens are long-lived, so `/mcp/<token>` is not served for them and the join snippets omit `pathFallbackUrl`; header auth only. Redacted in every log; proxy examples disable path logging.
 - Tokens are 32 random bytes, stored only as SHA-256, revocable, bound to one room and one participant.
 - Phase 2 permanent-room tokens never go in URLs.
 - Shim mode (stdio) removes the token from the remote URL entirely.
@@ -111,6 +111,7 @@ Residual: some abuse will happen; the design bounds duration, volume and the ope
 - Store per room in `localStorage` or an `HttpOnly` cookie; invite secret in a URL fragment (never sent to the server or to `Referer`).
 - Strict CSP, no third-party scripts, escape/sanitise all rendered message content (messages are untrusted HTML vectors for the web UI, not only for agents; render as text or sanitised Markdown).
 - Admin actions require the secret; rotation and recovery are phase 1b/2 work.
+- Permanent rooms (consequences): a lost browser must not orphan a durable room. The holder of `CREATE_KEY` can list rooms, rotate all three secrets (new ones shown once) and close a room via `/operator/...` (same wrong-key limiter), which makes `CREATE_KEY` the root credential for permanent rooms. The admin can erase single messages (`erase`, tombstone); the live `message_deleted` event is not implemented, so open tabs show the removal after a reload. No retention job yet.
 
 ### T-08 WebSocket and browser surface (Medium, Defend)
 
@@ -135,8 +136,8 @@ Permanent rooms and `room_history` let an agent read old messages: a hostile mes
 ### T-11 Storage security and privacy (Medium, Defend) *(new in v2)*
 
 - Anonymous rooms: by default nothing is written to Postgres or logs, and a negative test asserts it. There are exactly two exceptions, both explicit and audited: upgrade-with-consent to a permanent room (only the in-memory ring is persisted; departed participants' messages become tombstones) and an operator abuse freeze. Reverse-proxy logs must not contain paths with tokens or message bodies.
-- Permanent rooms: content in a `text` column; operator can read it. Document this, offer encryption-at-rest at the disk/database level, do not claim end-to-end encryption. (E2E would break server-side scanning, wrapping and search; if the owner wants it, it is a different product decision.)
-- Parameterised queries only (Drizzle), least-privilege DB role, migrations under review, backups encrypted, and listed in the privacy page.
+- Permanent rooms (phase 2a, implemented) keep content durably in Postgres until erased: there is no retention job yet (2b), so messages stay until an admin erases them one by one (tombstone) or the operator removes rows. Secrets and tokens are stored as SHA-256 only. Content is in a `text` column; operator can read it. Document this, offer encryption-at-rest at the disk/database level, do not claim end-to-end encryption. (E2E would break server-side scanning, wrapping and search; if the owner wants it, it is a different product decision.)
+- Parameterised queries only (plain SQL via `pg` in `apps/server/src/db.ts`; no ORM), dedicated Postgres instance (the app owns its database and runs DDL at boot, so no least-privilege role), migrations under review, backups encrypted, and listed in the privacy page.
 - Audit log: append-only, hashes not content; hashes of short text can still be personal data, so salt per room and bound retention.
 
 ### T-12 Insecure defaults for self-hosters (Medium, Mitigate) *(new in v2)*
