@@ -23,7 +23,8 @@ export type AppOptions = { cfg: Config; log: Logger; store?: RoomStore; now?: ()
 export async function createApp(o: AppOptions) {
   const { cfg, log } = o;
   const now = o.now ?? Date.now;
-  const store = o.store ?? new MemoryStore({ now, rng: o.rng, maxRooms: cfg.maxRooms, ttlMs: cfg.roomTtlSeconds * 1000, maxTotalBytes: cfg.maxTotalBytes, ...o.storeOptions });
+  const store = o.store ?? new MemoryStore({ now, rng: o.rng, maxRooms: cfg.maxRooms, ttlMs: cfg.roomTtlSeconds * 1000, maxTotalBytes: cfg.maxTotalBytes,
+    deliveryCooldownMs: cfg.deliveryCooldownSeconds * 1000, deliveriesPerDay: cfg.deliveriesPerDay, ...o.storeOptions });
   const rest = createRest({ store, log, cfg, createLimiter: new SlidingWindow(o.createsPerHour ?? cfg.roomsPerIpPerHour, 3600_000, now), keyFailLimiter: new SlidingWindow(cfg.createKeyFailsPer10Min, 600_000, now) });
   const mcp = createMcp({ store, log, now, callsPerMinute: cfg.mcpCallsPerMinute });
   const serveStatic = cfg.webDist ? await createStatic(cfg.webDist) : undefined;

@@ -62,12 +62,15 @@ export type MemoryStoreOptions = {
   maxWaitsPerParticipant?: number;
   maxTicketsPerRoom?: number;
   maxTicketsPerIp?: number;
+  deliveryCooldownMs?: number; // 0 disables
+  deliveriesPerDay?: number; // 0 disables
 };
 
 type Member = {
   id: string; ownerId: string; displayName: string; kind: 'agent' | 'human'; vendor?: Vendor; tokenHash?: string;
   cursor: number; joinSeq: number; left: boolean; conns: number; lastSeen: number | null; sent: Map<string, { seq: number; id: string }>;
   waits: Set<() => void>; // resolvers of this participant's open long-polls, oldest first
+  deliveredAt: number; dayStart: number; dayCount: number; // inbound delivery policy (agents only): last non-empty batch, 24h window start, messages delivered in it
 };
 type Room = {
   id: string; topic: string; secrets: Record<Role, string>; adminOwnerId: string; expiresAt: number; seq: number; ring: StoredMessage[]; bytes: number;
@@ -76,6 +79,7 @@ type Room = {
 
 const CLIENT_MSG_IDS = 100; // remembered per participant
 const TICKET_TTL_S = 30;
+const DAY_MS = 86_400_000;
 const CLOSING_WARNING_MS = 60_000;
 // Memory bound on the member map. Departed AGENTS stay in the map on purpose (anti-impersonation: a left agent's name cannot be reused in this room),
 // so a room that churns through 200 distinct agent names is full. The admin human is one stable member, so reconnects never grow the map.
@@ -113,6 +117,7 @@ export class MemoryStore implements RoomStore {
       ringSize: o.ringSize ?? LIMITS.ringSize, messagesPerMinute: o.messagesPerMinute ?? LIMITS.messagesPerMinutePerRoom,
       ttlMs: Math.min(o.ttlMs ?? LIMITS.roomTtlMs, LIMITS.roomTtlMs), ringBytes: o.ringBytes ?? 2 * 1024 * 1024, maxTotalBytes: o.maxTotalBytes ?? 256 * 1024 * 1024,
       maxWaitsPerParticipant: o.maxWaitsPerParticipant ?? 2, maxTicketsPerRoom: o.maxTicketsPerRoom ?? 50, maxTicketsPerIp: o.maxTicketsPerIp ?? 20,
+      deliveryCooldownMs: o.deliveryCooldownMs ?? 5000, deliveriesPerDay: o.deliveriesPerDay ?? 2000,
     };
   }
 
@@ -149,7 +154,7 @@ export class MemoryStore implements RoomStore {
   private newMember(r: Room, kind: 'agent' | 'human', displayName: string, ownerId: string, vendor?: Vendor): Member {
     const active = [...r.members.values()].filter((m) => !m.left && m.kind === kind).length;
     if (r.members.size >= MAX_MEMBERS || active >= (kind === 'agent' ? this.o.maxAgents : this.o.maxHumans)) throw new StoreError('room_full', `room is full (max ${kind === 'agent' ? this.o.maxAgents : this.o.maxHumans} ${kind}s)`);
-    const m: Member = { id: 'p_' + this.hex(6), ownerId, displayName, kind, vendor, cursor: r.seq, joinSeq: r.seq, left: false, conns: 0, lastSeen: null, sent: new Map(), waits: new Set() };
+    const m: Member = { id: 'p_' + this.hex(6), ownerId, displayName, kind, vendor, cursor: r.seq, joinSeq: r.seq, left: false, conns: 0, lastSeen: null, sent: new Map(), waits: new Set(), deliveredAt: -Infinity, dayStart: -Infinity, dayCount: 0 };
     r.members.set(m.id, m);
     return m;
   }
@@ -159,6 +164,16 @@ export class MemoryStore implements RoomStore {
   }
   private pending(r: Room, m: Member, since: number) {
     return r.ring.filter((x) => x.seq > since && x.from.participantId !== m.id);
+  }
+  /** Inbound delivery policy for agents: a pending mention always passes; otherwise the batch is held (hold = ms until it may pass) during the
+   *  cooldown after the last batch, or once the daily cap is spent. Held messages stay pending, the cursor is untouched. Humans are never held. */
+  private gate(m: Member, cand: StoredMessage[]): { cand: StoredMessage[]; hold: number } {
+    if (m.kind === 'human' || !cand.length || cand.some((x) => x.mentions.includes(m.id))) return { cand, hold: 0 };
+    const t = this.now();
+    if (t - m.dayStart >= DAY_MS) { m.dayStart = t; m.dayCount = 0; } // fixed window, restarts on the first delivery decision after it ends
+    if (this.o.deliveriesPerDay > 0 && m.dayCount >= this.o.deliveriesPerDay) return { cand: [], hold: m.dayStart + DAY_MS - t };
+    const hold = m.deliveredAt + this.o.deliveryCooldownMs - t;
+    return hold > 0 ? { cand: [], hold } : { cand, hold: 0 };
   }
   private shutdown(r: Room, reason: string) {
     this.emit(r, { type: 'closed', reason });
@@ -280,7 +295,10 @@ export class MemoryStore implements RoomStore {
     const r = this.open(roomId);
     const m = r.members.get(participantId);
     if (!m || m.left) throw new StoreError('bad_request', 'not a participant of this room');
-    const cand = this.pending(r, m, this.clamp(r, m, o.sinceSeq));
+    const since = this.clamp(r, m, o.sinceSeq);
+    const all = this.pending(r, m, since);
+    const cand = this.gate(m, all).cand;
+    if (all.length && !cand.length) return { messages: [], hasMore: false, lastSeq: since, names: this.names(r) }; // held: nothing lost, cursor stays
     const messages: StoredMessage[] = [];
     let bytes = 0;
     for (const x of cand) {
@@ -292,6 +310,7 @@ export class MemoryStore implements RoomStore {
     const lastSeq = hasMore ? messages.at(-1)!.seq : r.seq; // own messages in the range are skipped, not pending
     m.cursor = Math.max(m.cursor, lastSeq);
     m.lastSeen = this.now();
+    if (messages.length) { m.deliveredAt = this.now(); m.dayCount += messages.length; }
     if (messages.length) this.emit(r, { type: 'receipt', participantId, seqs: messages.map((x) => x.seq), at: this.now() });
     return { messages, hasMore, lastSeq, names: this.names(r) };
   }
@@ -301,15 +320,23 @@ export class MemoryStore implements RoomStore {
       const r = this.live(roomId);
       const m = r?.members.get(participantId);
       if (!r || !m) return resolve();
-      const ready = () => r.closed || m.left || this.pending(r, m, this.clamp(r, m, o.sinceSeq)).length > 0;
+      const ready = () => r.closed || m.left || this.gate(m, this.pending(r, m, this.clamp(r, m, o.sinceSeq))).cand.length > 0;
       if (ready() || o.waitMs <= 0 || o.signal?.aborted) return resolve();
-      const done = () => { m.waits.delete(done); clearTimeout(timer); r.listeners.delete(onEvent); o.signal?.removeEventListener('abort', done); resolve(); };
-      const onEvent = () => { if (ready()) done(); };
+      const done = () => { m.waits.delete(done); clearTimeout(timer); clearTimeout(wake); r.listeners.delete(onEvent); o.signal?.removeEventListener('abort', done); resolve(); };
+      let wake: NodeJS.Timeout | undefined;
+      const check = () => { // wake exactly when the hold ends instead of at the poll timeout
+        clearTimeout(wake);
+        if (ready()) return done();
+        const hold = this.gate(m, this.pending(r, m, this.clamp(r, m, o.sinceSeq))).hold;
+        if (hold > 0) wake = setTimeout(check, hold);
+      };
+      const onEvent = check;
       const timer = setTimeout(done, o.waitMs);
       r.listeners.add(onEvent);
       // cap: a new wait resolves the oldest one early (it returns with whatever is pending, normally nothing)
       while (m.waits.size >= this.o.maxWaitsPerParticipant) m.waits.values().next().value!();
       m.waits.add(done);
+      check();
       o.signal?.addEventListener('abort', done, { once: true });
     });
   }

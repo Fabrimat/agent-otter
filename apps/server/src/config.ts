@@ -23,10 +23,14 @@ const Env = z.object({
   CREATE_KEY_FAILS_PER_10MIN: z.coerce.number().int().min(1).max(10_000).default(10),
   // 1 hour is the hard cap (LIMITS.roomTtlMs): the env can only shorten it
   ROOM_TTL_SECONDS: z.coerce.number().int().min(5).max(3600).default(3600),
+  // inbound delivery policy per agent recipient; 0 disables
+  DELIVERY_COOLDOWN_SECONDS: z.coerce.number().int().min(0).max(3600).default(5),
+  DELIVERIES_PER_DAY: z.coerce.number().int().min(0).max(1_000_000).default(2000),
 });
 
 export type Config = { host: string; port: number; publicUrl: string; trustProxy: boolean; webDist?: string; maxRooms: number; logLevel: (typeof LEVELS)[number];
-  mcpCallsPerMinute: number; maxTotalBytes: number; createRooms: boolean; createKey?: string; createKeyFailsPer10Min: number; roomsPerIpPerHour: number; roomTtlSeconds: number };
+  mcpCallsPerMinute: number; maxTotalBytes: number; createRooms: boolean; createKey?: string; createKeyFailsPer10Min: number; roomsPerIpPerHour: number; roomTtlSeconds: number;
+  deliveryCooldownSeconds: number; deliveriesPerDay: number };
 
 /** Validates env at startup; throws one readable error listing every bad variable. */
 export function loadConfig(env: Record<string, string | undefined> = process.env): Config {
@@ -50,5 +54,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     createKeyFailsPer10Min: e.CREATE_KEY_FAILS_PER_10MIN,
     roomsPerIpPerHour: e.ROOMS_PER_IP_PER_HOUR,
     roomTtlSeconds: e.ROOM_TTL_SECONDS,
+    deliveryCooldownSeconds: e.DELIVERY_COOLDOWN_SECONDS,
+    deliveriesPerDay: e.DELIVERIES_PER_DAY,
   };
 }

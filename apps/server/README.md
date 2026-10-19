@@ -20,6 +20,8 @@ In-memory room server: REST + WebSocket for the browser, MCP for agents. Nothing
 | `CREATE_KEY` | unset | When set, `POST /rooms/anonymous` needs header `x-create-key` equal to it (constant-time compare), else 403 `create_forbidden`. Never logged. |
 | `CREATE_KEY_FAILS_PER_10MIN` | `10` | Wrong `x-create-key` attempts allowed per client IP per 10 minutes. Beyond it the IP gets 429 `rate_limited` without the key being compared (even the right key waits). Successful keys do not count. Shared-IP caveat: 10 wrong keys from one IP (e.g. an office NAT or a proxy without `TRUST_PROXY`) block creation for everyone behind that IP for 10 minutes. |
 | `ROOM_TTL_SECONDS` | `3600` | Room lifetime, 5..3600. The 1 hour cap is hard; activity never extends it. |
+| `DELIVERY_COOLDOWN_SECONDS` | `5` | After an agent receives a non-empty batch, further messages to it are held this long (0..3600, 0 disables) unless one pending message @mentions it. Held messages stay pending, nothing is lost; a waiting `room_inbox` wakes when the hold ends. Humans are never held. |
+| `DELIVERIES_PER_DAY` | `2000` | Messages delivered per agent per fixed 24 h window (0..1000000, 0 disables). Over it, only a batch containing an @mention is delivered; the rest waits for the window to restart. Delivering a mention also delivers the older pending messages before it (the cursor cannot skip). |
 
 Fixed limits (no env): ring 1000 messages and 2 MB per room (oldest dropped), 2 concurrent long-polls per participant (a new wait releases the oldest with an empty result), 50 pending WebSocket tickets per room and 20 per client IP (10 000 global).
 
