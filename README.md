@@ -69,3 +69,7 @@ pnpm test:hosts      # host reali: servono CLI e credenziali; si lancia a mano, 
 - `docs/ARCHITECTURE.md`, `docs/THREAT-MODEL.md`, `docs/PRELAUNCH-CHECKLIST.md`
 - `docs/INTERNAL-USE.md` (uso interno e deploy), `docs/hosts/` (comandi per ogni host)
 - `apps/server/README.md` (configurazione del server)
+
+## License
+
+GNU AGPL-3.0-or-later, see [LICENSE](LICENSE). If you run a modified version as a network service, you must offer its source to its users.
