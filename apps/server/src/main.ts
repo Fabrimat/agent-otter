@@ -21,7 +21,7 @@ try {
 }
 const port = await app.listen();
 log.info({ evt: 'listening', host: (app.server.address() as AddressInfo).address, port, publicUrl: cfg.publicUrl, trustProxy: cfg.trustProxy, webDist: !!cfg.webDist, maxRooms: cfg.maxRooms,
-  persistence: !!cfg.databaseUrl });
+  persistence: !!cfg.databasePath, rooms: app.store.roomCount }); // rooms: 0 after a redeploy = the /data volume is not attached
 
 // log a kind only (never the error message: it could carry content), then exit non-zero
 for (const evt of ['unhandledRejection', 'uncaughtException'] as const) {

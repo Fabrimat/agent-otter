@@ -59,9 +59,9 @@ export function createRest(d: { store: RoomStore; log: Logger; cfg: Config; crea
   /** Permanent rooms and the operator surface need BOTH a CREATE_KEY and a database. */
   function requireOperator(req: IncomingMessage) {
     // key first: an unauthenticated caller must not learn whether persistence is configured (no CREATE_KEY at all is public via /config)
-    if (!cfg.createKey) throw new StoreError('create_disabled', 'permanent rooms need CREATE_KEY and DATABASE_URL on this server');
+    if (!cfg.createKey) throw new StoreError('create_disabled', 'permanent rooms need CREATE_KEY and DATABASE_PATH on this server');
     requireKey(req);
-    if (!cfg.databaseUrl) throw new StoreError('create_disabled', 'permanent rooms need CREATE_KEY and DATABASE_URL on this server');
+    if (!cfg.databasePath) throw new StoreError('create_disabled', 'permanent rooms need CREATE_KEY and DATABASE_PATH on this server');
   }
 
   const routes: [string, RegExp, Handler][] = [

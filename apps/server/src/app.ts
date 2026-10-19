@@ -26,8 +26,8 @@ const HEALTH_CACHE_MS = 10_000;
 export async function createApp(o: AppOptions) {
   const { cfg, log } = o;
   const now = o.now ?? Date.now;
-  // persistence (permanent rooms) only with DATABASE_URL; unreachable or failing migrations reject here, so the process never runs memory-only by accident
-  const db = cfg.databaseUrl ? openDb(cfg.databaseUrl, (e) => log.error({ evt: 'db_error', op: 'idle', err: errKind(e) })) : undefined;
+  // persistence (permanent rooms) only with DATABASE_PATH; an unopenable file or failing migrations reject here, so the process never runs memory-only by accident
+  const db = cfg.databasePath ? openDb(cfg.databasePath) : undefined;
   const store = o.store ?? new MemoryStore({ now, rng: o.rng, maxRooms: cfg.maxRooms, ttlMs: cfg.roomTtlSeconds * 1000, maxTotalBytes: cfg.maxTotalBytes,
     deliveryCooldownMs: cfg.deliveryCooldownSeconds * 1000, deliveriesPerDay: cfg.deliveriesPerDay, db, log, ...o.storeOptions });
   try {

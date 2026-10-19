@@ -19,7 +19,11 @@ export const createLogger = (level: string, dest?: DestinationStream): Logger =>
   );
 
 /** The only thing an unexpected error contributes to a log line: its class name (messages can carry content). */
-export const errKind = (e: unknown): string => (e instanceof Error ? e.name : typeof e);
+export const errKind = (e: unknown): string => {
+  if (!(e instanceof Error)) return typeof e;
+  const { code, errcode } = e as { code?: unknown; errcode?: unknown };
+  return code === 'ERR_SQLITE_ERROR' && Number.isInteger(errcode) ? `${e.name}:${errcode}` : e.name; // SQLite driver errors: the result code only, never the message or path
+};
 
 /** Access-log path: query dropped (WS tickets), `/mcp/<token>` fallback token replaced. */
 export const redactPath = (pathname: string): string => pathname.replace(/^\/mcp\/.*/, '/mcp/<redacted>');

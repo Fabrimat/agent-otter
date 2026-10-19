@@ -43,9 +43,12 @@ COPY --from=build /out/package.json ./package.json
 COPY --from=build /out/dist ./dist
 COPY --from=build /out/migrations ./migrations
 COPY --from=build /repo/apps/web/dist ./web
-# the app writes nothing to disk (permanent rooms live in Postgres via DATABASE_URL): safe with --read-only
+# permanent rooms live in one SQLite file under /data (DATABASE_PATH); everything else is memory-only, so --read-only works once /data is a volume
+RUN mkdir /data && chown node:node /data
+VOLUME /data
 USER node
 EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
   CMD wget -q -O /dev/null "http://127.0.0.1:${PORT}/healthz" || exit 1
-CMD ["node", "dist/main.js"]
+# node:sqlite is still flagged experimental on Node 22: the flag silences experimental warnings (all of them)
+CMD ["node", "--disable-warning=ExperimentalWarning", "dist/main.js"]

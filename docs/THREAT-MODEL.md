@@ -30,7 +30,7 @@ The product delivers text written by strangers into the context of coding agents
 
 1. Browser to server (REST, WebSocket).
 2. Agent host to server (MCP over HTTP; the shim in phase 1b/2).
-3. Server to storage (memory in phase 1; Postgres write-through for permanent rooms in phase 2a).
+3. Server to storage (memory in phase 1; SQLite write-through for permanent rooms in phase 2a, Postgres deferred).
 4. Room content to the agent's model context (the critical boundary: untrusted text enters a privileged context).
 5. Agent's tools back to the room (`room_send`: data leaves the machine here).
 6. Room to room (doors, phase 3).
@@ -135,9 +135,9 @@ Permanent rooms and `room_history` let an agent read old messages: a hostile mes
 
 ### T-11 Storage security and privacy (Medium, Defend) *(new in v2)*
 
-- Anonymous rooms: by default nothing is written to Postgres or logs, and a negative test asserts it. There are exactly two exceptions, both explicit and audited: upgrade-with-consent to a permanent room (only the in-memory ring is persisted; departed participants' messages become tombstones) and an operator abuse freeze. Reverse-proxy logs must not contain paths with tokens or message bodies.
-- Permanent rooms (phase 2a, implemented) keep content durably in Postgres until erased: there is no retention job yet (2b), so messages stay until an admin erases them one by one (tombstone) or the operator removes rows. Secrets and tokens are stored as SHA-256 only. Content is in a `text` column; operator can read it. Document this, offer encryption-at-rest at the disk/database level, do not claim end-to-end encryption. (E2E would break server-side scanning, wrapping and search; if the owner wants it, it is a different product decision.)
-- Parameterised queries only (plain SQL via `pg` in `apps/server/src/db.ts`; no ORM), dedicated Postgres instance (the app owns its database and runs DDL at boot, so no least-privilege role), migrations under review, backups encrypted, and listed in the privacy page.
+- Anonymous rooms: by default nothing is written to the database or logs, and a negative test asserts it. There are exactly two exceptions, both explicit and audited: upgrade-with-consent to a permanent room (only the in-memory ring is persisted; departed participants' messages become tombstones) and an operator abuse freeze. Reverse-proxy logs must not contain paths with tokens or message bodies.
+- Permanent rooms (phase 2a, implemented) keep content durably in a SQLite file until erased: there is no retention job yet (2b), so messages stay until an admin erases them one by one (tombstone) or the operator removes rows. Secrets and tokens are stored as SHA-256 only. Content is in a `TEXT` column; whoever holds the file (or its backups) can read it. Document this, offer encryption-at-rest at the disk/database level, do not claim end-to-end encryption. (E2E would break server-side scanning, wrapping and search; if the owner wants it, it is a different product decision.)
+- Parameterised queries only (plain SQL via `node:sqlite` in `apps/server/src/db.ts`; no ORM), a dedicated file the app owns (it runs DDL at boot; no network port, no database credentials), on a volume with restrictive permissions, migrations under review, backups encrypted (the file and its `-wal` sibling are one database: hot copy: `node:sqlite` `backup()`, see INTERNAL-USE.md; or stop the container and copy the file), and listed in the privacy page. Single instance only; Postgres is deferred until multi-instance or accounts need it.
 - Audit log: append-only, hashes not content; hashes of short text can still be personal data, so salt per room and bound retention.
 
 ### T-12 Insecure defaults for self-hosters (Medium, Mitigate) *(new in v2)*
@@ -198,4 +198,4 @@ P2 (phase 2): T-10/T-11 history controls, retention and erasure, audit log, shim
 
 ## 9. Review triggers
 
-Re-run this document when: a new host adapter or the shim ships; Postgres history ships; doors or move ship; any feature adds a new way for room content to reach a model or a tool; a vendor changes channel or MCP behaviour that affects wake or trust.
+Re-run this document when: a new host adapter or the shim ships; Postgres replaces SQLite; doors or move ship; any feature adds a new way for room content to reach a model or a tool; a vendor changes channel or MCP behaviour that affects wake or trust.

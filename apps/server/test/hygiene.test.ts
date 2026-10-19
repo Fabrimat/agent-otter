@@ -77,23 +77,23 @@ describe('logs and storage', () => {
     const dir = new URL('../src/', import.meta.url);
     for (const f of fs.readdirSync(dir)) {
       const code = fs.readFileSync(new URL(f, dir), 'utf8');
-      expect(code, f).not.toMatch(/writeFile|appendFile|createWriteStream|writeSync|sqlite|better-sqlite|node:sqlite|redis/i);
-      if (f !== 'db.ts') expect(code, f).not.toMatch(/\bpg\b|\bPool\b|\.query\(/);
+      expect(code, f).not.toMatch(/writeFile|appendFile|createWriteStream|writeSync|redis/i);
+      if (f !== 'db.ts') expect(code, f).not.toMatch(/node:sqlite|DatabaseSync|better-sqlite|\bpg\b|\bPool\b|\.query\(/);
     }
     // the behavioural half (an anonymous room issues zero queries and changes zero rows) runs below against a real database
   });
 });
 
 // "Leaves no trace" = zero rows changed AND zero queries after boot AND no persistence log event (the room id in the access log is fine).
-describe.skipIf(!process.env.DATABASE_URL)('anonymous rooms with persistence switched on', () => {
+describe('anonymous rooms with persistence switched on', () => {
   it('a full anonymous flow (through expiry) issues no query and changes no row', async () => {
     db = await freshDb();
-    s = await boot({ cfg: { databaseUrl: db.url } });
-    const counts = () => db!.sql(`SELECT (SELECT count(*) FROM rooms)::int AS rooms, (SELECT count(*) FROM participants)::int AS participants,
-      (SELECT count(*) FROM messages)::int AS messages, (SELECT count(*) FROM participant_cursors)::int AS cursors, (SELECT count(*) FROM agent_tokens)::int AS tokens`);
-    const before = await counts();
-    const pool = s.app.db!.pool;
-    const queries = [vi.spyOn(pool, 'query'), vi.spyOn(pool, 'connect')];
+    s = await boot({ cfg: { databasePath: db.path } });
+    const counts = () => db!.sql(`SELECT (SELECT count(*) FROM rooms) AS rooms, (SELECT count(*) FROM participants) AS participants,
+      (SELECT count(*) FROM messages) AS messages, (SELECT count(*) FROM participant_cursors) AS cursors, (SELECT count(*) FROM agent_tokens) AS tokens`);
+    const before = counts();
+    const handle = s.app.db!.handle; // every statement goes through prepare() or exec()
+    const queries = [vi.spyOn(handle, 'prepare'), vi.spyOn(handle, 'exec')];
     const logStart = s.logs.length;
     const marker = 'ANON-MARKER-51d2';
     const r = await s.mkRoom('anon topic');
@@ -118,16 +118,16 @@ describe.skipIf(!process.env.DATABASE_URL)('anonymous rooms with persistence swi
     await s.app.store.sweep();
     expect(await w.isClosed()).toBe(true);
     for (const q of queries) expect(q).not.toHaveBeenCalled();
-    expect(await counts()).toEqual(before);
+    expect(counts()).toEqual(before);
     const after = s.logs.slice(logStart).join('\n');
     expect(after).not.toMatch(/"evt":"(db_error|seq_drift|room_created)"/);
     expect(after).not.toContain(marker);
   });
 
-  it('log capture of a permanent-room flow contains no token, secret, key, database URL or message content', async () => {
+  it('log capture of a permanent-room flow contains no token, secret, key, database path or message content', async () => {
     db = await freshDb();
     const key = 'create-key-for-log-test-42';
-    s = await boot({ cfg: { databaseUrl: db.url, createKey: key } });
+    s = await boot({ cfg: { databasePath: db.path, createKey: key } });
     const r = await s.mkRoom('perm', 'permanent');
     const a = await r.join('alice'), b = await r.join('bob');
     const marker = 'PERM-PAYLOAD-MARKER-c0ffee';
@@ -147,7 +147,7 @@ describe.skipIf(!process.env.DATABASE_URL)('anonymous rooms with persistence swi
     const all = s.logs.join('\n');
     expect(all).toContain('"evt":"room_created"');
     for (const secret of [a.token, b.token, r.room.inviteSecret, r.room.adminSecret, r.room.viewSecret, rot.inviteSecret, rot.adminSecret, rot.viewSecret,
-      key, 'wrong-key-xyz', marker, db.url, new URL(db.url).password]) expect(all, secret).not.toContain(secret);
+      key, 'wrong-key-xyz', marker, db.path]) expect(all, secret).not.toContain(secret);
   });
 });
 
@@ -200,8 +200,9 @@ describe('config', () => {
     expect(loadConfig({ PORT: '8080', PUBLIC_URL: 'https://office.example.com/', TRUST_PROXY: 'true', MAX_ROOMS: '5', LOG_LEVEL: 'warn' })).toMatchObject({
       port: 8080, publicUrl: 'https://office.example.com', trustProxy: true, maxRooms: 5, logLevel: 'warn',
     });
-    expect(loadConfig({ DATABASE_URL: 'postgresql://u:p@db:5432/ao' }).databaseUrl).toBe('postgresql://u:p@db:5432/ao');
-    for (const bad of [{ PORT: 'abc' }, { PORT: '99999' }, { PUBLIC_URL: 'ftp://x' }, { PUBLIC_URL: 'http://x"; rm -rf /' }, { TRUST_PROXY: 'yes' }, { MAX_ROOMS: '0' }, { LOG_LEVEL: 'loud' }, { DATABASE_URL: 'mysql://x' }, { DATABASE_URL: 'postgres://' }, { WEB_DIST: join(tmpdir(), 'does-not-exist-ao') }]) {
+    expect(loadConfig({ DATABASE_PATH: ':memory:' }).databasePath).toBe(':memory:');
+    expect(loadConfig({ DATABASE_PATH: join(tmpdir(), 'ao.db') }).databasePath).toBe(join(tmpdir(), 'ao.db'));
+    for (const bad of [{ PORT: 'abc' }, { PORT: '99999' }, { PUBLIC_URL: 'ftp://x' }, { PUBLIC_URL: 'http://x"; rm -rf /' }, { TRUST_PROXY: 'yes' }, { MAX_ROOMS: '0' }, { LOG_LEVEL: 'loud' }, { DATABASE_PATH: join(tmpdir(), 'does-not-exist-ao', 'ao.db') }, { WEB_DIST: join(tmpdir(), 'does-not-exist-ao') }]) {
       expect(() => loadConfig(bad), JSON.stringify(bad)).toThrow(/invalid configuration/);
     }
   });

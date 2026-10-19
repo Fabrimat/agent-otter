@@ -1,6 +1,8 @@
-import { randomBytes } from 'node:crypto';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
-import pg from 'pg';
 import { ROUTES, type CreateRoomResponse, type JoinResponse, type ServerEvent, type WsTicketResponse } from '@agent-office/protocol';
 import { WebSocket } from 'ws';
 import { createApp, type AppOptions } from '../src/app.js';
@@ -45,7 +47,7 @@ export async function boot(o: { cfg?: Partial<Config>; app?: Partial<AppOptions>
     return { client, call, raw };
   }
 
-  /** `permanent`: POST /rooms with cfg.createKey (needs cfg.databaseUrl). */
+  /** `permanent`: POST /rooms with cfg.createKey (needs cfg.databasePath). */
   async function mkRoom(topic = 'topic', kind: 'anonymous' | 'permanent' = 'anonymous') {
     const created = kind === 'permanent'
       ? await api('POST', ROUTES.createPermanentRoom, { body: { topic }, headers: { 'x-create-key': cfg.createKey ?? '' } })
@@ -100,23 +102,21 @@ export async function boot(o: { cfg?: Partial<Config>; app?: Partial<AppOptions>
   };
 }
 
-/** Real Postgres for persistence tests (DATABASE_URL): a fresh schema per call via search_path, so parallel test files never share tables. */
+/** A temp SQLite file per call. `sql` is a SECOND handle on the same file: what an inspector (or a rogue second writer) sees. */
 export async function freshDb() {
-  const base = process.env.DATABASE_URL!;
-  const schema = 't_' + randomBytes(6).toString('hex');
-  const admin = new pg.Client({ connectionString: base });
-  await admin.connect();
-  await admin.query(`CREATE SCHEMA ${schema}`);
-  await admin.end();
-  const u = new URL(base);
-  u.searchParams.set('options', `-c search_path=${schema}`);
-  const pool = new pg.Pool({ connectionString: u.toString(), max: 2 });
+  const dir = mkdtempSync(join(tmpdir(), 'ao-db-'));
+  const path = join(dir, 'ao.db');
+  let h: DatabaseSync | undefined;
   return {
-    url: u.toString(),
-    sql: async (q: string, p: unknown[] = []) => (await pool.query(q, p)).rows as any[],
+    path,
+    sql: (q: string, p: SQLInputValue[] = []) => {
+      h ??= new DatabaseSync(path);
+      h.exec('PRAGMA busy_timeout = 5000');
+      return h.prepare(q).all(...p).map((r) => ({ ...r })) as any[];
+    },
     async drop() {
-      await pool.query(`DROP SCHEMA ${schema} CASCADE`).catch(() => {});
-      await pool.end();
+      if (h?.isOpen) h.close();
+      rmSync(dir, { recursive: true, force: true });
     },
   };
 }

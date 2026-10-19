@@ -1,6 +1,9 @@
-// Permanent rooms on a real Postgres (DATABASE_URL, e.g. a throwaway docker container). Skipped without it.
+// Permanent rooms on a real SQLite file: a temp file per test, no service and no env var needed.
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { MessagesResponse, OperatorRoomsResponse, ROUTES, RoomPublicInfo, RotateSecretsResponse } from '@agent-office/protocol';
 import { openDb } from '../src/db.js';
@@ -17,13 +20,13 @@ afterEach(async () => {
   db = undefined;
 });
 
-const start = async () => (s = await boot({ cfg: { databaseUrl: db!.url, createKey: KEY } }));
+const start = async () => (s = await boot({ cfg: { databasePath: db!.path, createKey: KEY } }));
 const restart = async () => { await s!.close(); return start(); };
 const seqs = (t: string) => headers(t).map((h) => Number(/ seq=(\d+)/.exec(h)![1]));
 const mem = (id: string) => (s!.app.store as any).rooms.get(id) as { seq: number; ring: { seq: number; content: string | null }[] };
 
 describe('permanent rooms: creation gate (no database needed)', () => {
-  it('POST /rooms needs both CREATE_KEY and DATABASE_URL, else create_disabled; anonymous creation is unchanged', async () => {
+  it('POST /rooms needs both CREATE_KEY and DATABASE_PATH, else create_disabled; anonymous creation is unchanged', async () => {
     s = await boot({ cfg: { createKey: KEY } });
     expect((await s.api('POST', ROUTES.createPermanentRoom, { headers: op, body: {} })).json).toMatchObject({ code: 'create_disabled' });
     expect((await s.api('GET', ROUTES.operatorRooms, { headers: op })).status).toBe(503);
@@ -33,20 +36,24 @@ describe('permanent rooms: creation gate (no database needed)', () => {
     expect((await s.api('POST', ROUTES.createPermanentRoom, { body: {} })).status).toBe(503);
   });
 
-  it('DATABASE_URL set but unreachable: the process exits non-zero and never logs the URL', async () => {
-    const url = 'postgres://ao:hunter2-pw@127.0.0.1:1/ao';
-    const p = spawn(process.execPath, ['--import', 'tsx', 'src/main.ts'], { cwd: new URL('..', import.meta.url), env: { ...process.env, DATABASE_URL: url, PORT: '0' } });
-    let out = '';
-    p.stdout.on('data', (c) => (out += c));
-    p.stderr.on('data', (c) => (out += c));
-    const code = await new Promise<number | null>((ok) => p.on('exit', ok));
-    expect(code).not.toBe(0);
-    expect(out).toContain('boot_failed');
-    expect(out).not.toContain('hunter2');
+  it('DATABASE_PATH set but unopenable: the process exits non-zero and never logs the path', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ao-secretdir-'));
+    try {
+      const p = spawn(process.execPath, ['--import', 'tsx', 'src/main.ts'], { cwd: new URL('..', import.meta.url), env: { ...process.env, DATABASE_PATH: dir, PORT: '0' } }); // a directory is not a database
+      let out = '';
+      p.stdout.on('data', (c) => (out += c));
+      p.stderr.on('data', (c) => (out += c));
+      const code = await new Promise<number | null>((ok) => p.on('exit', ok));
+      expect(code).not.toBe(0);
+      expect(out).toContain('boot_failed');
+      expect(out).not.toContain('ao-secretdir');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   }, 30_000);
 });
 
-describe.skipIf(!process.env.DATABASE_URL)('permanent rooms on Postgres', () => {
+describe('permanent rooms on SQLite', () => {
   it('T1 restart: tokens, cursors, history, seq and departed participants survive', async () => {
     db = await freshDb();
     await start();
@@ -72,9 +79,9 @@ describe.skipIf(!process.env.DATABASE_URL)('permanent rooms on Postgres', () => 
     expect(await a2.call('room_send', { content: 'm6' })).toMatch(/^sent seq=6 /);
     await expect(s!.agent(c.token)).rejects.toThrow(); // departed: token revoked
     expect((await s!.api('POST', ROUTES.join(id), { body: { inviteSecret: r.room.inviteSecret, displayName: 'carol', vendor: 'other' } })).json).toMatchObject({ code: 'name_taken' });
-    const parts = await db.sql('SELECT display_name, join_seq, left_at IS NOT NULL AS left FROM participants ORDER BY joined_at');
+    const parts = db.sql('SELECT display_name, join_seq, left_at IS NOT NULL AS left FROM participants ORDER BY rowid');
     expect(parts).toEqual([
-      { display_name: 'alice', join_seq: 0, left: false }, { display_name: 'bob', join_seq: 0, left: false }, { display_name: 'carol', join_seq: 0, left: true },
+      { display_name: 'alice', join_seq: 0, left: 0 }, { display_name: 'bob', join_seq: 0, left: 0 }, { display_name: 'carol', join_seq: 0, left: 1 },
     ]);
     const info = RoomPublicInfo.parse((await s!.api('GET', ROUTES.room(id), { headers: r.admin })).json);
     expect(info.participants.find((p) => p.displayName === 'carol')).toMatchObject({ left: true });
@@ -89,7 +96,7 @@ describe.skipIf(!process.env.DATABASE_URL)('permanent rooms on Postgres', () => 
     await w.until((e) => e.type === 'init');
     const outs = await Promise.all(Array.from({ length: 50 }, (_, i) => ag[i % 3]!.call('room_send', { content: `x${i}` })));
     const all = Array.from({ length: 50 }, (_, i) => i + 1);
-    expect((await db.sql('SELECT seq FROM messages ORDER BY seq')).map((x) => x.seq)).toEqual(all);
+    expect((db.sql('SELECT seq FROM messages ORDER BY seq')).map((x) => x.seq)).toEqual(all);
     expect(mem(r.room.roomId).ring.map((x) => x.seq)).toEqual(all);
     for (let i = 0; i < 100 && w.events.filter((e) => e.type === 'message').length < 50; i++) await sleep(20);
     expect(w.events.flatMap((e) => (e.type === 'message' ? [e.message.seq] : []))).toEqual(all);
@@ -111,14 +118,14 @@ describe.skipIf(!process.env.DATABASE_URL)('permanent rooms on Postgres', () => 
     await w.until((e) => e.type === 'init');
     await a.call('room_send', { content: 'one' });
     await w.until((e) => e.type === 'message');
-    await db.sql(`ALTER TABLE messages ADD CONSTRAINT t3 CHECK (content IS DISTINCT FROM 'boom')`);
+    db.sql(`CREATE TRIGGER t3 BEFORE INSERT ON messages WHEN NEW.content = 'boom' BEGIN SELECT RAISE(ABORT, 'boom'); END`);
     const n = w.events.length;
     const res = await a.raw('room_send', { content: 'boom' });
     expect(res.isError).toBe(true);
     expect(res.content[0]!.text).toMatch(/^internal: /);
     expect(mem(r.room.roomId).seq).toBe(1);
     expect(mem(r.room.roomId).ring.map((x) => x.seq)).toEqual([1]);
-    expect((await db.sql('SELECT last_seq FROM rooms'))[0].last_seq).toBe(1); // the UPDATE rolled back with the INSERT
+    expect((db.sql('SELECT last_seq FROM rooms'))[0].last_seq).toBe(1); // the UPDATE rolled back with the INSERT
     await sleep(50);
     expect(w.events.slice(n).filter((e) => e.type === 'message')).toEqual([]);
     expect(await a.call('room_send', { content: 'two' })).toMatch(/^sent seq=2 /);
@@ -160,9 +167,9 @@ describe.skipIf(!process.env.DATABASE_URL)('permanent rooms on Postgres', () => 
     expect((await erase(2)).status).toBe(200);
     expect((await erase(99)).json).toMatchObject({ code: 'bad_request' });
     expect((await s!.api('POST', ROUTES.admin(r.room.roomId), { headers: r.view, body: { action: 'erase', seq: 1 } })).status).toBe(403);
-    const rows = await db.sql('SELECT seq, content, deleted_at IS NOT NULL AS deleted FROM messages ORDER BY seq');
-    expect(rows).toEqual([{ seq: 1, content: 'keep-1', deleted: false }, { seq: 2, content: null, deleted: true }, { seq: 3, content: 'keep-3', deleted: false }]);
-    expect((await db.sql('SELECT last_seq FROM participant_cursors'))).toEqual(expect.arrayContaining([{ last_seq: 3 }]));
+    const rows = db.sql('SELECT seq, content, deleted_at IS NOT NULL AS deleted FROM messages ORDER BY seq');
+    expect(rows).toEqual([{ seq: 1, content: 'keep-1', deleted: 0 }, { seq: 2, content: null, deleted: 1 }, { seq: 3, content: 'keep-3', deleted: 0 }]);
+    expect((db.sql('SELECT last_seq FROM participant_cursors'))).toEqual(expect.arrayContaining([{ last_seq: 3 }]));
     const everywhere = async (call: (n: string, x?: Record<string, unknown>) => Promise<string>) => {
       const rest = MessagesResponse.parse((await s!.api('GET', ROUTES.messages(r.room.roomId), { headers: r.admin })).json);
       expect(rest.messages.map((m) => [m.seq, m.content])).toEqual([[3, 'keep-3'], [2, '[deleted]'], [1, 'keep-1']]);
@@ -188,16 +195,16 @@ describe.skipIf(!process.env.DATABASE_URL)('permanent rooms on Postgres', () => 
     await a.call('room_send', { content: 'hello' });
     await b.call('room_inbox', { waitSeconds: 0 });
     const rot = RotateSecretsResponse.parse((await s!.api('POST', ROUTES.operatorRotate(r.room.roomId), { headers: op })).json);
-    const tables = (await db.sql(`SELECT table_name FROM information_schema.tables WHERE table_schema = current_schema()`)).map((x) => x.table_name as string);
+    const tables = (db.sql(`SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'`)).map((x) => x.name as string);
     expect(tables).toEqual(expect.arrayContaining(['rooms', 'participants', 'messages', 'participant_cursors', 'agent_tokens', 'schema_migrations']));
     let dump = '';
-    for (const t of tables) dump += (await db.sql(`SELECT row_to_json(x)::text AS j FROM ${t} x`)).map((x) => x.j).join('\n');
+    for (const t of tables) dump += db.sql(`SELECT * FROM ${t}`).map((x) => JSON.stringify(x)).join('\n');
     for (const secret of [r.room.inviteSecret, r.room.adminSecret, r.room.viewSecret, rot.inviteSecret, rot.adminSecret, rot.viewSecret, a.token, b.token, KEY]) {
       expect(dump, 'plaintext at rest').not.toContain(secret);
     }
     const sha = (x: string) => createHash('sha256').update(x).digest('hex');
     expect(dump).toContain(sha(a.token));
-    expect((await db.sql('SELECT admin_hash FROM rooms'))[0].admin_hash).toBe(sha(rot.adminSecret));
+    expect((db.sql('SELECT admin_hash FROM rooms'))[0].admin_hash).toBe(sha(rot.adminSecret));
   });
 
   it('T8 a permanent room survives the clock moving 2 h and sweep(): no closing, no room_closed', async () => {
@@ -216,9 +223,9 @@ describe.skipIf(!process.env.DATABASE_URL)('permanent rooms on Postgres', () => 
     expect((await s!.api('GET', ROUTES.room(r.room.roomId), { headers: r.admin })).json).toMatchObject({ closed: false, expiresAt: null });
   });
 
-  it('T9 migrations are idempotent and concurrent boots apply them once', async () => {
+  it('T9 migrations are idempotent and two handles on one file apply them once', async () => {
     db = await freshDb();
-    const x = openDb(db.url), y = openDb(db.url);
+    const x = openDb(db.path), y = openDb(db.path);
     try {
       await Promise.all([x.migrate(), y.migrate(), x.migrate()]);
       await y.migrate();
@@ -226,9 +233,9 @@ describe.skipIf(!process.env.DATABASE_URL)('permanent rooms on Postgres', () => 
       await x.end();
       await y.end();
     }
-    expect((await db.sql('SELECT version FROM schema_migrations')).map((v) => v.version)).toEqual(['001_init.sql']);
+    expect(db.sql('SELECT version FROM schema_migrations').map((v) => v.version)).toEqual(['001_init.sql']);
     await start(); // booting on an already migrated database is a no-op
-    expect((await db.sql('SELECT count(*)::int AS n FROM schema_migrations'))[0].n).toBe(1);
+    expect(db.sql('SELECT count(*) AS n FROM schema_migrations')[0].n).toBe(1);
   });
 
   it('T10 drift guard: a row written behind our back is detected, the ring resyncs, no duplicate seq', async () => {
@@ -238,14 +245,14 @@ describe.skipIf(!process.env.DATABASE_URL)('permanent rooms on Postgres', () => 
     const a = await r.join('alice');
     await a.call('room_send', { content: 'mine-1' });
     // what a second writer does: claim the next seq and insert
-    await db.sql(`WITH s AS (UPDATE rooms SET last_seq = last_seq + 1 WHERE id = $1 RETURNING last_seq)
-      INSERT INTO messages (room_id, seq, id, ts, from_participant_id, from_owner_id, from_display_name, from_kind, content)
-      SELECT $1, last_seq, 'foreign-1', 0, 'p_ghost', 'o_ghost', 'ghost', 'agent', 'foreign' FROM s`, [r.room.roomId]);
+    db.sql('UPDATE rooms SET last_seq = last_seq + 1 WHERE id = ?', [r.room.roomId]); // db.sql is a second handle on the same file
+    db.sql(`INSERT INTO messages (room_id, seq, id, ts, from_participant_id, from_owner_id, from_display_name, from_kind, content)
+      SELECT id, 2, 'foreign-1', 0, 'p_ghost', 'o_ghost', 'ghost', 'agent', 'foreign' FROM rooms WHERE id = ?`, [r.room.roomId]);
     expect(await a.call('room_send', { content: 'mine-3' })).toMatch(/^sent seq=3 /);
     expect(s!.logs.join('\n')).toContain('"evt":"seq_drift"');
     expect(mem(r.room.roomId).ring.map((x) => x.seq)).toEqual([1, 2, 3]);
     expect(mem(r.room.roomId).seq).toBe(3);
-    expect((await db.sql('SELECT seq FROM messages ORDER BY seq')).map((x) => x.seq)).toEqual([1, 2, 3]);
+    expect((db.sql('SELECT seq FROM messages ORDER BY seq')).map((x) => x.seq)).toEqual([1, 2, 3]);
     expect(await a.call('room_send', { content: 'mine-4' })).toMatch(/^sent seq=4 /);
   });
 
@@ -273,9 +280,10 @@ describe.skipIf(!process.env.DATABASE_URL)('permanent rooms on Postgres', () => 
     const r = await s!.mkRoom('gap', 'permanent');
     const a = await r.join('alice'), b = await r.join('bob');
     await a.call('room_send', { content: 'seed' });
-    await db.sql(`INSERT INTO messages (room_id, seq, id, ts, from_participant_id, from_owner_id, from_display_name, from_kind, content)
-      SELECT $1, g, 'bulk-' || g, 0, 'p_ghost', 'o_ghost', 'ghost', 'agent', 'bulk' || g FROM generate_series(2, 250) g`, [r.room.roomId]);
-    await db.sql('UPDATE rooms SET last_seq = 250 WHERE id = $1', [r.room.roomId]);
+    db.sql(`WITH RECURSIVE g(n) AS (SELECT 2 UNION ALL SELECT n + 1 FROM g WHERE n < 250)
+      INSERT INTO messages (room_id, seq, id, ts, from_participant_id, from_owner_id, from_display_name, from_kind, content)
+      SELECT ?, n, 'bulk-' || n, 0, 'p_ghost', 'o_ghost', 'ghost', 'agent', 'bulk' || n FROM g`, [r.room.roomId]);
+    db.sql('UPDATE rooms SET last_seq = 250 WHERE id = ?', [r.room.roomId]);
     await restart();
     const b2 = await s!.agent(b.token);
     const t = await b2.call('room_inbox', { waitSeconds: 0 });
@@ -305,7 +313,7 @@ describe.skipIf(!process.env.DATABASE_URL)('permanent rooms on Postgres', () => 
     await expect(a.raw('room_send', { content: 'after close' })).rejects.toThrow(); // token revoked: 401
     await expect(s!.agent(a.token)).rejects.toThrow();
     expect((await s!.api('POST', ROUTES.join(id), { body: { inviteSecret: rot.inviteSecret, displayName: 'zed', vendor: 'other' } })).json).toMatchObject({ code: 'room_closed' });
-    expect((await db.sql('SELECT count(*)::int AS n FROM agent_tokens WHERE revoked_at IS NULL'))[0].n).toBe(0);
+    expect((db.sql('SELECT count(*) AS n FROM agent_tokens WHERE revoked_at IS NULL'))[0].n).toBe(0);
 
     await restart();
     expect((await s!.api('GET', ROUTES.room(id), { headers: { 'x-view-secret': rot.viewSecret } })).json).toMatchObject({ closed: true, kind: 'permanent' });

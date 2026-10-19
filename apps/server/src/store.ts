@@ -29,6 +29,7 @@ export type JoinResult = Identity & { token: string; vendor: Vendor; cursorStart
 export type PermanentRoomInfo = { roomId: string; topic: string; closed: boolean; lastSeq: number; activeParticipants: number };
 
 export interface RoomStore {
+  readonly roomCount: number; // rooms currently loaded (boot log)
   createRoom(topic: string, kind?: RoomKind): Promise<CreateRoomResponse>;
   getRoom(roomId: string): Promise<RoomPublicInfo | undefined>;
   checkSecret(roomId: string, role: Role, secret: string): Promise<boolean>;
@@ -118,6 +119,7 @@ const mk = (p: Pick<Member, 'id' | 'ownerId' | 'displayName' | 'kind' | 'vendor'
 
 export class MemoryStore implements RoomStore {
   private rooms = new Map<string, Room>();
+  get roomCount() { return this.rooms.size; }
   private tokens = new Map<string, { roomId: string; participantId: string }>(); // sha256(token) hex -> owner
   private tickets = new Map<string, { roomId: string; role: 'admin' | 'viewer'; ip: string; exp: number }>();
   private now: () => number;

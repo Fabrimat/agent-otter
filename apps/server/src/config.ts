@@ -1,4 +1,5 @@
-import { statSync } from 'node:fs';
+import { accessSync, constants, statSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
 import { isIP } from 'node:net';
 import * as z from 'zod/v4';
 
@@ -26,13 +27,13 @@ const Env = z.object({
   // inbound delivery policy per agent recipient; 0 disables
   DELIVERY_COOLDOWN_SECONDS: z.coerce.number().int().min(0).max(3600).default(5),
   DELIVERIES_PER_DAY: z.coerce.number().int().min(0).max(1_000_000).default(2000),
-  // permanent rooms; unset = anonymous rooms only. Set and unreachable at boot = the process exits (never silently memory-only)
-  DATABASE_URL: z.string().regex(/^postgres(ql)?:\/\/\S+$/, 'must be a postgres:// or postgresql:// URL').optional(),
+  // permanent rooms (SQLite file, or :memory: in tests); unset = anonymous rooms only. Set and unopenable at boot = the process exits (never silently memory-only)
+  DATABASE_PATH: z.string().min(1).optional(),
 });
 
 export type Config = { host: string; port: number; publicUrl: string; trustProxy: boolean; webDist?: string; maxRooms: number; logLevel: (typeof LEVELS)[number];
   mcpCallsPerMinute: number; maxTotalBytes: number; createRooms: boolean; createKey?: string; createKeyFailsPer10Min: number; roomsPerIpPerHour: number; roomTtlSeconds: number;
-  deliveryCooldownSeconds: number; deliveriesPerDay: number; databaseUrl?: string };
+  deliveryCooldownSeconds: number; deliveriesPerDay: number; databasePath?: string };
 
 /** Validates env at startup; throws one readable error listing every bad variable. */
 export function loadConfig(env: Record<string, string | undefined> = process.env): Config {
@@ -41,6 +42,10 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
   if (!r.success) throw new Error('invalid configuration: ' + r.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; '));
   const e = r.data;
   if (e.WEB_DIST && !statSync(e.WEB_DIST, { throwIfNoEntry: false })?.isDirectory()) throw new Error('invalid configuration: WEB_DIST is not a directory');
+  if (e.DATABASE_PATH && e.DATABASE_PATH !== ':memory:') {
+    const dir = dirname(resolve(e.DATABASE_PATH));
+    try { accessSync(dir, constants.W_OK); if (!statSync(dir).isDirectory()) throw 0; } catch { throw new Error('invalid configuration: DATABASE_PATH directory does not exist or is not writable'); }
+  }
   return {
     host: e.HOST,
     port: e.PORT,
@@ -58,6 +63,6 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     roomTtlSeconds: e.ROOM_TTL_SECONDS,
     deliveryCooldownSeconds: e.DELIVERY_COOLDOWN_SECONDS,
     deliveriesPerDay: e.DELIVERIES_PER_DAY,
-    databaseUrl: e.DATABASE_URL,
+    databasePath: e.DATABASE_PATH,
   };
 }
