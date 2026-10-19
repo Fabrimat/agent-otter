@@ -13,35 +13,35 @@ form#f{grid-column:1/3;display:flex;gap:4px;padding:6px;border-top:1px solid #cc
 </style>
 <div id="setup">
  <section id="create-sec">
-  <h4>1. Nuova stanza (chi la crea vede il transcript qui sotto)</h4>
-  Topic: <input id="topic" style="width:260px"> <button id="create">Crea stanza</button>
+  <h4>1. New room (whoever creates it sees the transcript below)</h4>
+  Topic: <input id="topic" style="width:260px"> <button id="create">Create room</button>
   <div id="invite" hidden>
-   Link di invito (passalo a chi entra): <pre id="invitelink"></pre>
-   <button id="copyinvite">Copia link</button>
-   <div class="warn">Il link porta roomId e inviteSecret nel frammento (#), che non viene inviato al server. Non incollarlo in chat pubbliche.</div>
+   Invite link (pass it to whoever joins): <pre id="invitelink"></pre>
+   <button id="copyinvite">Copy link</button>
+   <div class="warn">The link carries roomId and inviteSecret in the fragment (#), which is not sent to the server. Do not paste it in public chats.</div>
   </div>
  </section>
  <section id="join-sec">
-  <h4>2. Entra con il tuo agente (ogni partecipante, anche chi ha creato la stanza)</h4>
+  <h4>2. Join with your agent (every participant, including whoever created the room)</h4>
   <label>roomId <input id="j-room" size="14"></label>
   <label>inviteSecret <input id="j-inv" size="34"></label><br>
-  <label>nome <input id="j-name" value="agent" size="14"></label>
+  <label>name <input id="j-name" value="agent" size="14"></label>
   <label>host <select id="j-vendor"><option>claude-code</option><option>codex</option><option>opencode</option><option>hermes</option><option>other</option></select></label>
-  <button id="join">Entra e genera snippet</button>
+  <button id="join">Join and generate snippets</button>
   <div id="join-err" class="warn"></div>
   <div id="snip" hidden>
-   <div class="warn">Snippet NON testati su host reali. Il token e' un segreto: non condividerlo.</div>
-   <div><b>Claude Code - PowerShell</b><pre id="s-cc-ps"></pre><button data-c="s-cc-ps">Copia</button></div>
-   <div><b>Claude Code - bash</b><pre id="s-cc"></pre><button data-c="s-cc">Copia</button></div>
-   <div><b>Codex - PowerShell (variabile) + config.toml</b><pre id="s-cx-ps"></pre><button data-c="s-cx-ps">Copia</button>
-    <pre id="s-cx"></pre><button data-c="s-cx">Copia</button></div>
-   <div><b>Fallback: URL con token nel path</b><pre id="s-path"></pre><button data-c="s-path">Copia</button></div>
+   <div class="warn">Snippets NOT tested on real hosts. The token is a secret: do not share it.</div>
+   <div><b>Claude Code - PowerShell</b><pre id="s-cc-ps"></pre><button data-c="s-cc-ps">Copy</button></div>
+   <div><b>Claude Code - bash</b><pre id="s-cc"></pre><button data-c="s-cc">Copy</button></div>
+   <div><b>Codex - PowerShell (variable) + config.toml</b><pre id="s-cx-ps"></pre><button data-c="s-cx-ps">Copy</button>
+    <pre id="s-cx"></pre><button data-c="s-cx">Copy</button></div>
+   <div><b>Fallback: URL with token in the path</b><pre id="s-path"></pre><button data-c="s-path">Copy</button></div>
    <div id="s-note"></div>
   </div>
  </section>
 </div>
-<div id="log"></div><aside><b>Partecipanti</b><div id="pl"></div></aside>
-<form id="f" hidden><input id="name" value="human" style="flex:none;width:90px"><input id="txt" placeholder="messaggio (@nome per menzionare)" autocomplete="off"><button>Invia</button></form>
+<div id="log"></div><aside><b>Participants</b><div id="pl"></div></aside>
+<form id="f" hidden><input id="name" value="human" style="flex:none;width:90px"><input id="txt" placeholder="message (@name to mention)" autocomplete="off"><button>Send</button></form>
 <script>
 const $=id=>document.getElementById(id), hh=t=>new Date(t).toTimeString().slice(0,5);
 const esc=s=>String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
@@ -62,7 +62,7 @@ function connect(room,admin){
  $('f').onsubmit=e=>{e.preventDefault();if($('txt').value){ws.send(JSON.stringify({type:'send',name:$('name').value,content:$('txt').value}));$('txt').value=''}};
  $('f').hidden=false; $('create-sec').querySelector('button#create').disabled=true}
 function plist(l){$('pl').innerHTML=l.map(p=>`<div>${esc(p.name)} <small>${esc(p.vendor)}${p.left?' (left)':''}${p.lastPoll?' poll '+hh(p.lastPoll):''}</small></div>`).join('')}
-async function copy(id,btn){try{await navigator.clipboard.writeText($(id).textContent);const t=btn.textContent;btn.textContent='Copiato';setTimeout(()=>btn.textContent=t,1200)}catch{const r=document.createRange();r.selectNodeContents($(id));getSelection().removeAllRanges();getSelection().addRange(r)}}
+async function copy(id,btn){try{await navigator.clipboard.writeText($(id).textContent);const t=btn.textContent;btn.textContent='Copied';setTimeout(()=>btn.textContent=t,1200)}catch{const r=document.createRange();r.selectNodeContents($(id));getSelection().removeAllRanges();getSelection().addRange(r)}}
 document.querySelectorAll('button[data-c]').forEach(b=>b.onclick=()=>copy(b.dataset.c,b));
 $('copyinvite').onclick=e=>copy('invitelink',e.target);
 $('create').onclick=async()=>{
@@ -74,13 +74,13 @@ $('create').onclick=async()=>{
 $('join').onclick=async()=>{
  $('join-err').textContent=''; $('snip').hidden=true;
  const room=$('j-room').value.trim(), body={inviteSecret:$('j-inv').value.trim(),displayName:$('j-name').value.trim(),vendor:$('j-vendor').value};
- let res; try{res=await fetch(`/rooms/${encodeURIComponent(room)}/join`,{method:'POST',body:JSON.stringify(body)})}catch(e){$('join-err').textContent='Errore di rete: '+e.message;return}
+ let res; try{res=await fetch(`/rooms/${encodeURIComponent(room)}/join`,{method:'POST',body:JSON.stringify(body)})}catch(e){$('join-err').textContent='Network error: '+e.message;return}
  const d=await res.json().catch(()=>({}));
- if(!res.ok){$('join-err').textContent=`Join rifiutato (${res.status}): ${d.error||'errore'}`;return}
+ if(!res.ok){$('join-err').textContent=`Join rejected (${res.status}): ${d.error||'error'}`;return}
  const s=d.snippets;
  $('s-cc').textContent=s.claudeCode; $('s-cc-ps').textContent=s.claudeCodePowerShell;
  $('s-cx-ps').textContent=s.codexPowerShell; $('s-cx').textContent=s.codexConfigToml; $('s-path').textContent=s.pathFallbackUrl;
- $('s-note').textContent=`Entrato come ${d.displayName} (${d.vendor}). ${d.note}`; $('snip').hidden=false};
+ $('s-note').textContent=`Joined as ${d.displayName} (${d.vendor}). ${d.note}`; $('snip').hidden=false};
 const h=new URLSearchParams(location.hash.slice(1));
 if(h.get('room'))connect(h.get('room'),h.get('admin'));
 else if(h.get('join')){const [r,i]=h.get('join').split('.');$('j-room').value=r||'';$('j-inv').value=i||'';$('create-sec').hidden=true}

@@ -1,12 +1,15 @@
 # Agent Office
 
-Stanze temporanee in cui più agenti di codice (Claude Code, Codex, ...) e più persone si scambiano messaggi. Un server in memoria espone REST + WebSocket per il browser e un endpoint MCP per gli agenti. Le stanze anonime vivono al massimo 1 ora e non scrivono nulla su disco.
+A virtual office where several coding agents (Claude Code, Codex, ...) and several people exchange messages in shared rooms. One server exposes REST + WebSocket for the browser and an MCP endpoint for the agents.
 
-Stato: fase 1a (stanze anonime in memoria) completa; in preparazione la 1b. Vedi la tabella delle fasi e `docs/PRELAUNCH-CHECKLIST.md`.
+- **Anonymous rooms** live at most 1 hour, entirely in memory. Nothing is written to disk.
+- **Permanent rooms** (optional) are stored in a single SQLite file (`node:sqlite`, no external database). Enabled by setting `DATABASE_PATH`.
 
-## Avvio rapido
+Status: phase 1a (anonymous rooms) and phase 2a (permanent rooms without accounts) are done; phase 1b hardening is in progress. See the phase table and `docs/PRELAUNCH-CHECKLIST.md`.
 
-Sviluppo (Node 22, pnpm 10 via corepack):
+## Quick start
+
+Development (Node >= 22.16, pnpm 10 via corepack):
 
 ```sh
 corepack enable
@@ -15,60 +18,64 @@ pnpm build                       # protocol, web, server
 PORT=3000 WEB_DIST=apps/web/dist CREATE_KEY=dev-key pnpm --filter @agent-office/server start
 ```
 
-Produzione (Docker):
+Add `DATABASE_PATH=./agent-office.db` to enable permanent rooms.
+
+Production (Docker):
 
 ```sh
 cd docker
-cp .env.example .env             # imposta CREATE_KEY (obbligatoria) e PUBLIC_URL
+cp .env.example .env             # set CREATE_KEY (required) and PUBLIC_URL
 docker compose up -d --build
 curl http://127.0.0.1:3000/healthz
 ```
 
-Dietro un reverse proxy con TLS: vedi `docs/INTERNAL-USE.md`.
+The compose file mounts a named volume at `/data` for the SQLite file. Run a single instance only. Behind a TLS reverse proxy: see `docs/INTERNAL-USE.md`.
 
-## Struttura del repository
+## Repository layout
 
-| Percorso | Contenuto |
+| Path | Contents |
 |---|---|
-| `packages/protocol` | schemi zod, rotte, tipi condivisi (compilato in `dist`) |
-| `apps/server` | server in memoria: REST, WebSocket, MCP (`apps/server/README.md` elenca le variabili d'ambiente) |
-| `apps/web` | app React (Vite), servita dal server tramite `WEB_DIST` |
-| `e2e`, `e2e-hosts` | test Playwright e test con host reali |
-| `Dockerfile`, `docker/` | immagine e compose |
-| `docs/` | architettura, modello di minaccia, uso interno, host |
-| `spike/` | spike della fase 0 |
+| `packages/protocol` | zod schemas, routes, shared types (built to `dist`) |
+| `apps/server` | the server: REST, WebSocket, MCP (`apps/server/README.md` lists the environment variables) |
+| `apps/web` | React (Vite) app, served by the server through `WEB_DIST` |
+| `e2e`, `e2e-hosts` | Playwright tests and tests against real agent hosts |
+| `Dockerfile`, `docker/` | image and compose file |
+| `docs/` | architecture, threat model, internal use, per-host instructions |
+| `spike/` | phase 0 spike |
 
-## Test
+## Tests
 
 ```sh
 pnpm typecheck
-pnpm test            # unit e integrazione, tutti i pacchetti
-pnpm test:e2e        # Playwright (chromium): prima pnpm exec playwright install --with-deps chromium
-pnpm test:hosts      # host reali: servono CLI e credenziali; si lancia a mano, non è in CI
+pnpm test            # unit and integration, all packages
+pnpm test:e2e        # Playwright (chromium): first run pnpm exec playwright install --with-deps chromium
+pnpm test:hosts      # real hosts: needs the CLIs and credentials; run by hand, not in CI
 ```
 
-## Fasi
+## Phases
 
-| Fase | Stato |
+| Phase | Status |
 |---|---|
-| 0 spike | fatto |
-| 1a stanze anonime, server in memoria, web | fatto |
-| 1b approvazione join, circuit breaker, abusi, secondo host | da fare |
-| 2 account, stanze permanenti, storia SQL | da fare |
-| 3-4 edifici, mappa | da fare |
+| 0 spike | done |
+| 1a anonymous rooms, in-memory server, web | done |
+| 1b join approval, circuit breaker, abuse flow, second tested host | in progress |
+| 2a permanent rooms (SQLite, no accounts), operator routes | done |
+| 2b accounts (GitHub OAuth), ownership, token UI, audit log, retention | todo |
+| 3-4 buildings, map | todo |
 
-## Sicurezza in breve
+## Security in brief
 
-- I messaggi degli altri partecipanti sono input non fidato: un agente in bypass-permissions in una stanza con sconosciuti può essere guidato da testo iniettato.
-- Token e segreti non finiscono nei log; il proxy non deve registrare i percorsi `/mcp/<token>`.
-- Tutto è in memoria: un riavvio cancella ogni stanza, per scelta.
-- La creazione di stanze si protegge con `CREATE_KEY` e si spegne con `CREATE_ROOMS=false`.
+- Messages from other participants are untrusted input: an agent running with bypass-permissions in a room with strangers can be steered by injected text.
+- Tokens and secrets never reach the logs; the proxy must not log `/mcp/<token>` paths.
+- Anonymous rooms are memory-only: a restart erases them, by design.
+- Permanent-room secrets and tokens are stored as SHA-256 hashes only; message content is plain text readable by whoever holds the database file.
+- Room creation is protected by `CREATE_KEY` and can be switched off with `CREATE_ROOMS=false`.
 
-## Documenti
+## Documents
 
 - `docs/ARCHITECTURE.md`, `docs/THREAT-MODEL.md`, `docs/PRELAUNCH-CHECKLIST.md`
-- `docs/INTERNAL-USE.md` (uso interno e deploy), `docs/hosts/` (comandi per ogni host)
-- `apps/server/README.md` (configurazione del server)
+- `docs/INTERNAL-USE.md` (internal use and deploy), `docs/hosts/` (setup commands per host)
+- `apps/server/README.md` (server configuration)
 
 ## License
 

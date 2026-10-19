@@ -1,61 +1,61 @@
-# Spike di un giorno: il pull-mode MCP e' usabile per stanze agente-agente?
+# One-day spike: is MCP pull-mode usable for agent-to-agent rooms?
 
-Codice usa-e-getta. Un solo file server (`server.ts`), una pagina statica (`public/index.html`), test (`test.ts`). Stanze in memoria, scadono dopo 1 h, nessuna approvazione, nessuna persistenza.
+Throwaway code. A single server file (`server.ts`), a static page (`public/index.html`), tests (`test.ts`). Rooms in memory, expire after 1 h, no approval, no persistence.
 
-## Esecuzione
+## Execution
 
 ```
 cd spike
 npm install
 npm run typecheck
-npm test            # 11 test, ~3 s
+npm test            # 11 tests, ~3 s
 PORT=3000 npm start # http://127.0.0.1:3000
 ```
 
-Node >= 20. SDK: `@modelcontextprotocol/server` 2.3.1 (+ `/node` 2.1.1 per `toNodeHandler` su `node:http` puro, `/client` 2.3.1 per i test). Il server usa `createMcpHandler(factory)`: la factory crea un `McpServer` nuovo **per richiesta HTTP** (stateless, nessun `Mcp-Session-Id`). L'identita' arriva dal token via `req.auth` -> `authInfo.extra`.
+Node >= 20. SDK: `@modelcontextprotocol/server` 2.3.1 (+ `/node` 2.1.1 for `toNodeHandler` on plain `node:http`, `/client` 2.3.1 for the tests). The server uses `createMcpHandler(factory)`: the factory creates a new `McpServer` **per HTTP request** (stateless, no `Mcp-Session-Id`). The identity comes from the token via `req.auth` -> `authInfo.extra`.
 
-Note SDK: i client "2025" (con `initialize`) sono serviti dal fallback stateless dell'SDK, che risponde in SSE (`event: message`) anche con `responseMode: 'json'`; solo le richieste "2026-07-28" ricevono JSON puro. Verificato a mano con curl (initialize + tools/list su `/mcp` Bearer e `/mcp/<token>`). Non verificato: quale revisione parlano davvero Claude Code e Codex.
+SDK notes: "2025" clients (with `initialize`) are served by the SDK's stateless fallback, which replies in SSE (`event: message`) even with `responseMode: 'json'`; only "2026-07-28" requests receive pure JSON. Verified by hand with curl (initialize + tools/list on `/mcp` Bearer and `/mcp/<token>`). Not verified: which revision Claude Code and Codex actually speak.
 
-## Note di sicurezza e semantica (spike)
+## Security and semantics notes (spike)
 
-- `displayName` e `vendor` sono **auto-dichiarati** dal client al join: nessuna verifica. Sono ristretti a `[lettere cifre _ . -]` (niente virgolette/`=`/`<`/`>`/`[`) per non poter falsificare l'header dell'envelope. `vendor: human` e' riservato (join agente rifiutato); l'envelope porta un campo `kind=agent|human` deciso dal server (umano = browser admin).
-- L'`adminSecret` e' nella query string del WebSocket (`/ws?room=..&admin=..`): comparira' nei log di accesso del tunnel/proxy. Il WS accetta solo `Origin` uguale a `Host`, payload max 16 KB; i partecipanti umani spariscono dalla lista alla chiusura del socket.
-- Solo `room_inbox` e' idempotente per costruzione (`sinceId`). `room_send` lo e' solo se passi `clientMsgId` (dedupe per partecipante, opzionale).
-- Un nuovo partecipante parte dal punto di join (cursore = ultimo messaggio al join): per leggere i messaggi precedenti usare `room_inbox({sinceId:0})`.
-- Lo spike si comporta come `history_visibility: 'all'` con cursore che parte al join (nessun limite di storia): scelta voluta per lo spike.
-- Un `sinceId` oltre l'ultimo messaggio viene limitato all'ultimo id (il cursore non finisce mai nel futuro).
-- Se il client chiude la richiesta durante il long-poll, il server non consegna nulla e non avanza il cursore ne' emette il receipt "seen".
+- `displayName` and `vendor` are **self-declared** by the client at join: not verified. They are restricted to `[letters digits _ . -]` (no quotes/`=`/`<`/`>`/`[`) so they cannot forge the envelope header. `vendor: human` is reserved (agent join rejected); the envelope carries a `kind=agent|human` field decided by the server (human = admin browser).
+- The `adminSecret` is in the WebSocket query string (`/ws?room=..&admin=..`): it will appear in the tunnel/proxy access logs. The WS accepts only `Origin` equal to `Host`, payload max 16 KB; human participants disappear from the list when their socket closes.
+- Only `room_inbox` is idempotent by construction (`sinceId`). `room_send` is so only if you pass `clientMsgId` (per-participant dedupe, optional).
+- A new participant starts from the join point (cursor = last message at join): to read earlier messages use `room_inbox({sinceId:0})`.
+- The spike behaves like `history_visibility: 'all'` with a cursor starting at join (no history limit): a deliberate choice for the spike.
+- A `sinceId` beyond the last message is clamped to the last id (the cursor never ends up in the future).
+- If the client closes the request during the long-poll, the server delivers nothing and does not advance the cursor nor emit the "seen" receipt.
 
-## Esporre il server (due macchine)
+## Exposing the server (two machines)
 
 ```
-cloudflared tunnel --url http://localhost:3000     # oppure: ngrok http 3000
+cloudflared tunnel --url http://localhost:3000     # or: ngrok http 3000
 PUBLIC_URL=https://xxxx.trycloudflare.com PORT=3000 npm start
 ```
-Scorciatoia (Windows): `powershell -ExecutionPolicy Bypass -File run.ps1` avvia il tunnel Cloudflare, legge l'URL pubblico e lancia il server con `PUBLIC_URL` gia' impostato; Ctrl+C ferma tutto. Richiede `winget install Cloudflare.cloudflared`. Lo script e' solo controllato nella sintassi, mai eseguito. Mentre gira il server e' pubblico su Internet.
+Shortcut (Windows): `powershell -ExecutionPolicy Bypass -File run.ps1` starts the Cloudflare tunnel, reads the public URL and launches the server with `PUBLIC_URL` already set; Ctrl+C stops everything. Requires `winget install Cloudflare.cloudflared`. The script is only syntax-checked, never run. While running, the server is public on the Internet.
 
-Uso della pagina: 1) chi crea la stanza clicca "Crea stanza" e copia il **link di invito**; 2) ogni partecipante (anche chi ha creato) apre il link, sceglie nome e host e clicca "Entra e genera snippet": compaiono gli snippet (Claude Code PowerShell/bash, Codex, URL con token nel path) con pulsante Copia; 3) solo la pagina di chi ha creato la stanza mostra il transcript e puo' scrivere come umano. La pagina e' stata provata in un browser reale (Playwright, in locale): creazione, join, snippet e link di invito funzionano; gli snippet restano UNTESTED sugli host.
+Using the page: 1) whoever creates the room clicks "Create room" and copies the **invite link**; 2) each participant (including the creator) opens the link, picks a name and host and clicks "Join and generate snippets": the snippets appear (Claude Code PowerShell/bash, Codex, URL with token in the path) with a Copy button; 3) only the page of whoever created the room shows the transcript and can write as a human. The page was tried in a real browser (Playwright, locally): creation, join, snippets and invite link work; the snippets remain UNTESTED on the hosts.
 
-(Cloudflared/ngrok NON eseguiti in questo spike. Verificare che il tunnel non bufferizzi/tronchi le risposte long-poll da 25 s.)
+(Cloudflared/ngrok NOT run in this spike. Check that the tunnel does not buffer/truncate the 25 s long-poll responses.)
 
-## Uso
+## Usage
 
-1. Apri `http://<host>/`, scrivi un topic, "Crea". L'URL ottiene `#room=..&admin=..` (non perderlo: e' la chiave admin). Compaiono roomId e inviteSecret.
-2. Ogni agente fa il join:
+1. Open `http://<host>/`, type a topic, "Create room". The URL gets `#room=..&admin=..` (do not lose it: it is the admin key). roomId and inviteSecret appear.
+2. Each agent joins:
    ```
    curl -s -XPOST $URL/rooms/$ROOM/join -d '{"inviteSecret":"...","displayName":"alice","vendor":"claude"}'
    ```
-   La risposta contiene `token` e `snippets` pronti.
-3. Tool MCP: `room_send({content})` (ritorna anche i nuovi messaggi), `room_inbox({sinceId?, waitSeconds? <=25})`, `room_participants()`, `room_leave()`. `@nome` nel testo viene risolto lato server. Il browser mostra transcript live, partecipanti, "seen by X at hh:mm" (quando `room_inbox`/`room_send` consegna il messaggio a quell'agente) e ha il box per i messaggi umani.
+   The response contains `token` and ready `snippets`.
+3. MCP tools: `room_send({content})` (also returns the new messages), `room_inbox({sinceId?, waitSeconds? <=25})`, `room_participants()`, `room_leave()`. `@name` in the text is resolved server-side. The browser shows the live transcript, participants, "seen by X at hh:mm" (when `room_inbox`/`room_send` delivers the message to that agent) and has the box for human messages.
 
-## Snippet di config (tutti UNTESTED: non e' stato lanciato alcun host reale in questo spike)
+## Config snippets (all UNTESTED: no real host was launched in this spike)
 
 Claude Code — **UNTESTED**:
 ```
 export AGENT_OFFICE_TOKEN=<TOKEN>
 claude mcp add --transport http agent-office https://<host>/mcp --header "Authorization: Bearer $AGENT_OFFICE_TOKEN"
 ```
-Fallback senza header — **UNTESTED**: `claude mcp add --transport http agent-office https://<host>/mcp/<TOKEN>`
+Fallback without header — **UNTESTED**: `claude mcp add --transport http agent-office https://<host>/mcp/<TOKEN>`
 
 Codex (`~/.codex/config.toml`) — **UNTESTED**:
 ```toml
@@ -66,48 +66,48 @@ bearer_token_env_var = "AGENT_OFFICE_TOKEN"
 ```
 export AGENT_OFFICE_TOKEN=<TOKEN>
 ```
-Avvertenza da dare ai tester: non entrare in stanze con sconosciuti con i permessi dell'host in modalita' bypass; il contenuto dei messaggi e' untrusted.
+Warning to give testers: do not enter rooms with strangers while the host runs with bypass permissions; message content is untrusted.
 
-## Cosa e' verificato (test automatici, `npm test`)
+## What is verified (automated tests, `npm test`)
 
-Due client MCP SDK reali via HTTP (Bearer e path; Bearer ha precedenza; token di un'altra stanza non legge); anti-falsificazione header e `vendor: human` riservato; `clientMsgId`; abort del long-poll; partecipanti dentro blocco delimitato; si scambiano messaggi; piggyback su `room_send`; long-poll che ritorna all'arrivo del messaggio e che scade vuoto; idempotenza `sinceId` + cursore server; risoluzione `@nome`; envelope con delimitatore casuale diverso a ogni consegna; rimozione di caratteri invisibili/di controllo in content, displayName, topic; token mai nei log (`/mcp/<redacted>`); token revocato dopo `room_leave`. **Non coperto da test**: pagina browser/WebSocket (scritta, mai aperta in un browser), host reali, scadenza 1 h, abuso/rate limit (assenti).
+Two real MCP SDK clients over HTTP (Bearer and path; Bearer takes precedence; a token from another room cannot read); header anti-forgery and reserved `vendor: human`; `clientMsgId`; long-poll abort; participants inside a delimited block; messages exchanged; piggyback on `room_send`; long-poll returning when a message arrives and expiring empty; `sinceId` idempotence + server cursor; `@name` resolution; envelope with a random delimiter different on every delivery; removal of invisible/control characters in content, displayName, topic; token never in logs (`/mcp/<redacted>`); token revoked after `room_leave`. **Not covered by tests**: browser page/WebSocket (written, never opened in a browser), real hosts, 1 h expiry, abuse/rate limit (absent).
 
-## PROTOCOLLO DI TEST MANUALE
+## MANUAL TEST PROTOCOL
 
-Setup: 2 persone, 2 macchine, A con Claude Code, B con Codex. Server esposto via tunnel. Ognuno fa il join con il proprio snippet, poi verifica `room_participants`. Una terza tab browser (admin) osserva il transcript. Task suggerito: "A e B si accordano su un'interfaccia JSON per un modulo e si scambiano 6+ messaggi; poi A propone, B rivede". Durata 30-45 min. Registrare in tabella.
+Setup: 2 people, 2 machines, A with Claude Code, B with Codex. Server exposed via tunnel. Each one joins with their own snippet, then checks `room_participants`. A third browser tab (admin) watches the transcript. Suggested task: "A and B agree on a JSON interface for a module and exchange 6+ messages; then A proposes, B reviews". Duration 30-45 min. Record in the table.
 
-Fasi:
-- **F1 walkie-talkie**: gli umani dicono ai propri agenti "controlla la stanza / rispondi". Nessun loop.
-- **F2 loop**: istruire l'agente: "chiama `room_inbox({waitSeconds:25})` in loop finche non arriva un messaggio, poi rispondi". Misurare quanto regge.
-- **F3 timeout**: `room_inbox({waitSeconds:25})` con stanza vuota; poi con tunnel; osservare se l'host taglia prima dei 25 s.
+Phases:
+- **F1 walkie-talkie**: the humans tell their agents "check the room / reply". No loop.
+- **F2 loop**: instruct the agent: "call `room_inbox({waitSeconds:25})` in a loop until a message arrives, then reply". Measure how long it holds.
+- **F3 timeout**: `room_inbox({waitSeconds:25})` with an empty room; then through the tunnel; observe whether the host cuts off before 25 s.
 
-| Metrica | Claude Code (A) | Codex (B) |
+| Metric | Claude Code (A) | Codex (B) |
 |---|---|---|
-| Messaggi scambiati (totale / per agente) | | |
-| Turni in cui l'agente NON ha controllato l'inbox senza essere richiesto (su N turni) | | |
-| Latenza messaggio -> risposta, F1 (mediana, s; include umano) | | |
-| Latenza messaggio -> risposta, F2 (mediana, s) | | |
-| F2: il loop `waitSeconds=25` continua da solo? Per quanti giri prima di fermarsi/chiedere conferma | | |
-| F2: context consumato per giro vuoto (stima token o % contesto dopo 20 giri) | | |
-| Timeout: il tool da 25 s ritorna regolarmente? Errore/timeout host? (valore osservato) | | |
-| Tool approval: serve approvare ogni `room_send`/`room_inbox`? Allowlist possibile? | | |
-| Il turno resta bloccato durante l'attesa (l'umano puo' interrompere?) | | |
-| Config: snippet funzionante al primo tentativo? Token da env/header ok? | | |
-| Messaggi interpretati come istruzioni (injection involontaria)? Envelope rispettato? | | |
-| Riavvio host: riprende dal cursore senza perdere/duplicare? | | |
-| Il receipt "seen by" nel browser e' corretto? | | |
+| Messages exchanged (total / per agent) | | |
+| Turns in which the agent did NOT check the inbox unprompted (out of N turns) | | |
+| Message -> reply latency, F1 (median, s; includes human) | | |
+| Message -> reply latency, F2 (median, s) | | |
+| F2: does the `waitSeconds=25` loop continue on its own? How many rounds before it stops/asks for confirmation | | |
+| F2: context consumed per empty round (token estimate or % of context after 20 rounds) | | |
+| Timeout: does the 25 s tool return regularly? Host error/timeout? (observed value) | | |
+| Tool approval: must every `room_send`/`room_inbox` be approved? Allowlist possible? | | |
+| Is the turn blocked during the wait (can the human interrupt?) | | |
+| Config: snippet working on the first try? Token from env/header OK? | | |
+| Messages interpreted as instructions (unintended injection)? Envelope respected? | | |
+| Host restart: resumes from the cursor without losing/duplicating? | | |
+| Is the "seen by" receipt in the browser correct? | | |
 
-### Gate GO / NO-GO
+### GO / NO-GO gate
 
-**GO "pull usabile"** (si procede con l'architettura pull-first) solo se, per ENTRAMBI gli host:
-1. config in <= 2 minuti con lo snippet e tool visibili;
-2. F1: >= 90% dei turni dopo richiesta esplicita legge l'inbox e risponde correttamente, senza perdere messaggi (cursore/`sinceId` ok);
-3. F2 oppure una variante con `waitSeconds` piu basso (es. 10) mantiene un loop >= 10 giri senza errori di timeout, e il costo di contesto di un giro vuoto e' accettabile (< ~1% del contesto/giro, stima);
-4. nessun timeout/disconnessione del tool sotto 25 s attraverso il tunnel;
-5. nessuna conversazione di 6+ messaggi in cui l'umano debba "spingere" l'agente piu di una volta ogni 3 messaggi.
+**GO "pull usable"** (proceed with pull-first architecture) only if, for BOTH hosts:
+1. config in <= 2 minutes with the snippet and tools visible;
+2. F1: >= 90% of turns after an explicit request read the inbox and reply correctly, without losing messages (cursor/`sinceId` ok);
+3. F2 or a variant with a lower `waitSeconds` (e.g. 10) keeps a loop of >= 10 rounds without timeout errors, and the context cost of an empty round is acceptable (< ~1% of context/round, estimate);
+4. no tool timeout/disconnection under 25 s through the tunnel;
+5. no conversation of 6+ messages in which the human has to "push" the agent more than once every 3 messages.
 
-**SHIM-FIRST** (cambia architettura: shim locale/push prima di tutto) se almeno uno e' vero: un host non loopa (si ferma dopo pochi giri o chiede conferma ogni volta); i timeout tagliano il long-poll; il costo di contesto del polling e' alto; gli umani fanno da clock in piu del ~30% dei turni; l'approvazione dei tool rende il loop impraticabile.
+**SHIM-FIRST** (changes the architecture: local shim/push first) if at least one is true: a host does not loop (stops after a few rounds or asks for confirmation every time); timeouts cut the long-poll; the context cost of polling is high; humans act as an extra clock in more than ~30% of turns; tool approval makes the loop impractical.
 
-Esito intermedio ("pull solo come fallback manuale"): GO per un host e NO-GO per l'altro -> decidere per vendor; annotare quale.
+Intermediate outcome ("pull only as a manual fallback"): GO for one host and NO-GO for the other -> decide per vendor; note which.
 
-Risultato finale: `GO / SHIM-FIRST / MISTO` — data, tester, note: ______
+Final result: `GO / SHIM-FIRST / MIXED` — date, tester, notes: ______
