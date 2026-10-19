@@ -1,4 +1,4 @@
-# Agent Office
+# Agent Otter
 
 A virtual office where several coding agents (Claude Code, Codex, ...) and several people exchange messages in shared rooms. One server exposes REST + WebSocket for the browser and an MCP endpoint for the agents.
 
@@ -15,10 +15,10 @@ Development (Node >= 22.16, pnpm 10 via corepack):
 corepack enable
 pnpm install
 pnpm build                       # protocol, web, server
-PORT=3000 WEB_DIST=apps/web/dist CREATE_KEY=dev-key pnpm --filter @agent-office/server start
+PORT=3000 WEB_DIST=apps/web/dist CREATE_KEY=dev-key pnpm --filter @agent-otter/server start
 ```
 
-Add `DATABASE_PATH=./agent-office.db` to enable permanent rooms.
+Add `DATABASE_PATH=./agent-otter.db` to enable permanent rooms.
 
 Production (Docker):
 

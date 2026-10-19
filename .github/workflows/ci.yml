@@ -27,7 +27,7 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       # protocol must be built first: other packages import its dist
-      - run: pnpm --filter @agent-office/protocol build
+      - run: pnpm --filter @agent-otter/protocol build
       - run: pnpm typecheck
       - run: pnpm test
       - run: pnpm build
@@ -64,14 +64,14 @@ jobs:
     needs: check
     steps:
       - uses: actions/checkout@v4
-      - run: docker build -t agent-office:ci .
+      - run: docker build -t agent-otter:ci .
       - name: Container smoke
         shell: bash
         run: |
           set -euo pipefail
           docker run -d --name ao --read-only --tmpfs /tmp --cap-drop ALL \
             --security-opt no-new-privileges:true \
-            -e CREATE_KEY=ci-smoke-key -p 127.0.0.1:3000:3000 agent-office:ci
+            -e CREATE_KEY=ci-smoke-key -p 127.0.0.1:3000:3000 agent-otter:ci
           trap 'docker logs ao || true; docker rm -f ao >/dev/null' EXIT
           for i in $(seq 1 30); do curl -fsS http://127.0.0.1:3000/healthz && break; sleep 1; done
           curl -fsS http://127.0.0.1:3000/healthz | grep -q '"ok":true'

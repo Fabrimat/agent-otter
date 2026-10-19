@@ -6,7 +6,7 @@ import type { AddressInfo } from 'node:net';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
-import { HEADERS, ROUTES, type CreateRoomResponse, type DeliveredMessage, type JoinResponse, type MessagesResponse, type RoomPublicInfo, type ServerEvent, type Vendor, type WsTicketResponse } from '@agent-office/protocol';
+import { HEADERS, ROUTES, type CreateRoomResponse, type DeliveredMessage, type JoinResponse, type MessagesResponse, type RoomPublicInfo, type ServerEvent, type Vendor, type WsTicketResponse } from '@agent-otter/protocol';
 import { WebSocket } from 'ws';
 import { createApp } from '../../apps/server/src/app.js';
 import { loadConfig } from '../../apps/server/src/config.js';

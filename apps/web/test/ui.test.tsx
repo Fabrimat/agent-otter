@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ONBOARDING_PROMPT } from '@agent-office/protocol';
+import { ONBOARDING_PROMPT } from '@agent-otter/protocol';
 import { App } from '../src/App';
 import { CopyButton, Countdown } from '../src/components';
 import { RoomView } from '../src/RoomView';

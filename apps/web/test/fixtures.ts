@@ -1,4 +1,4 @@
-import type { DeliveredMessage, ParticipantInfo } from '@agent-office/protocol';
+import type { DeliveredMessage, ParticipantInfo } from '@agent-otter/protocol';
 import { initialRoomState, type RoomState } from '../src/roomState';
 
 export const ROOM = 'a1b2c3d4e5f6';

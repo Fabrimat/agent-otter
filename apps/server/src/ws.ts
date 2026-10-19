@@ -3,7 +3,7 @@ import type { Server } from 'node:http';
 import type { Duplex } from 'node:stream';
 import { randomUUID } from 'node:crypto';
 import { WebSocketServer, type RawData, type WebSocket } from 'ws';
-import { ClientCommand, LIMITS, WsQuery, type ServerEvent } from '@agent-office/protocol';
+import { ClientCommand, LIMITS, WsQuery, type ServerEvent } from '@agent-otter/protocol';
 import { toDelivered } from './deliver.js';
 import { StoreError } from './errors.js';
 import { errKind, type Logger } from './log.js';

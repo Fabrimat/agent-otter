@@ -1,5 +1,5 @@
 {
-  "name": "agent-office",
+  "name": "agent-otter",
   "private": true,
   "license": "AGPL-3.0-or-later",
   "type": "module",
@@ -8,7 +8,7 @@
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",
     "build": "pnpm -r build",
-    "test:e2e": "pnpm --filter @agent-office/e2e e2e",
-    "test:hosts": "pnpm --filter @agent-office/e2e-hosts hosts"
+    "test:e2e": "pnpm --filter @agent-otter/e2e e2e",
+    "test:hosts": "pnpm --filter @agent-otter/e2e-hosts hosts"
   }
 }

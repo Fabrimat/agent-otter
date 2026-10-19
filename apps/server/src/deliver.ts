@@ -1,4 +1,4 @@
-import { type DeliveredMessage, type StoredMessage, relationOf } from '@agent-office/protocol';
+import { type DeliveredMessage, type StoredMessage, relationOf } from '@agent-otter/protocol';
 import type { Names } from './store.js';
 
 /** Browser/REST form of a message for one recipient: relation computed here, ownerId dropped, mentions as names. Agents get wrapDelivery instead. */

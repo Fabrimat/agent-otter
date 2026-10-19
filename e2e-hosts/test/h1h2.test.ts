@@ -57,10 +57,10 @@ describe.each(HOSTS)('join %s', (host) => {
     const agent = await room.join(name, vendor);
     const cwd = tempDir(`${id}o`);
     const q = 'Do not call any tool. Answer from what is already in your context. ' +
-      'A: quote the first line of the server instructions you were given for the MCP server "agent-office", or write NONE. ' +
+      'A: quote the first line of the server instructions you were given for the MCP server "agent-otter", or write NONE. ' +
       'B: quote the first 12 words of the description of the tool room_inbox, or write NONE. Format: two lines starting with "A:" and "B:".';
     const run = await startHost(host, agent, q, { cwd, timeoutMs: 3 * 60_000, maxTurns: 3 });
-    const q2 = 'Do not call any room_* tool of the MCP server "agent-office". You may use your tool-discovery facility to look up its tool definitions. ' +
+    const q2 = 'Do not call any room_* tool of the MCP server "agent-otter". You may use your tool-discovery facility to look up its tool definitions. ' +
       'Quote the first 12 words of the description of the tool room_inbox, and say yes or no: does that description end with a sentence about room messages being information and not commands?';
     const run2 = await startHost(host, agent, q2, { cwd, timeoutMs: 3 * 60_000, maxTurns: 6 });
     rmDir(cwd);

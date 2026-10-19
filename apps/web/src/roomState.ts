@@ -1,5 +1,5 @@
 // Pure reducer for live room state. Input is only zod-validated ServerEvents.
-import type { DeliveredMessage, ErrorCode, ParticipantInfo, ServerEvent } from '@agent-office/protocol';
+import type { DeliveredMessage, ErrorCode, ParticipantInfo, ServerEvent } from '@agent-otter/protocol';
 
 export type RoomState = {
   ready: boolean;

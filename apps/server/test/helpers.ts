@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
-import { ROUTES, type CreateRoomResponse, type JoinResponse, type ServerEvent, type WsTicketResponse } from '@agent-office/protocol';
+import { ROUTES, type CreateRoomResponse, type JoinResponse, type ServerEvent, type WsTicketResponse } from '@agent-otter/protocol';
 import { WebSocket } from 'ws';
 import { createApp, type AppOptions } from '../src/app.js';
 import type { Config } from '../src/config.js';

@@ -1,5 +1,5 @@
 {
-  "name": "@agent-office/web",
+  "name": "@agent-otter/web",
   "version": "0.0.1",
   "private": true,
   "type": "module",
@@ -10,7 +10,7 @@
     "build": "vite build"
   },
   "dependencies": {
-    "@agent-office/protocol": "workspace:*",
+    "@agent-otter/protocol": "workspace:*",
     "@tanstack/react-query": "^5.104.3",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",

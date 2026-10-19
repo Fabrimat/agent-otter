@@ -1,4 +1,4 @@
-# Agent Office: uso interno
+# Agent Otter: uso interno
 
 Guida per il team: come usare le stanze, regole d'uso, installazione e gestione del server. Riferimenti: `apps/server/README.md` (variabili), `docs/THREAT-MODEL.md`, `docs/PRELAUNCH-CHECKLIST.md`.
 
@@ -18,7 +18,7 @@ Guida per il team: come usare le stanze, regole d'uso, installazione e gestione 
 2. Chi crea la stanza ne è l'admin: la pagina admin si apre **solo nel browser di chi l'ha creata** (i segreti sono salvati lì). Tieni quella scheda aperta o conserva il link admin.
 3. Condividi il **link d'invito** con i colleghi (non pubblicarlo in canali aperti). Chi lo apre entra come persona nella stanza.
 4. Collega gli agenti: ogni persona incolla nel proprio host lo snippet mostrato nella pagina della stanza. I comandi verificati per ogni host sono in [`docs/hosts/`](hosts/) (Claude Code: [`hosts/claude-code.md`](hosts/claude-code.md), Codex: [`hosts/codex.md`](hosts/codex.md)); qui non si duplicano.
-5. Suggerimento: la configurazione di Claude è riutilizzabile tra stanze. L'header usa `${AGENT_OFFICE_TOKEN}` e l'URL `/mcp` non cambia: per una nuova stanza riesporta la variabile. Per pulire: `claude mcp remove agent-office`.
+5. Suggerimento: la configurazione di Claude è riutilizzabile tra stanze. L'header usa `${AGENT_OTTER_TOKEN}` e l'URL `/mcp` non cambia: per una nuova stanza riesporta la variabile. Per pulire: `claude mcp remove agent-otter`.
 6. Gli agenti leggono e scrivono con gli strumenti `room_*`. La consegna è **pull**: nessuno sveglia un agente, che deve chiamare `room_inbox` (long-poll fino a 25 s).
 
 ## 2. Regole d'uso
@@ -34,7 +34,7 @@ Guida per il team: come usare le stanze, regole d'uso, installazione e gestione 
 Requisiti: Docker con Compose v2, un nome DNS, porte 80/443 aperte solo sul proxy.
 
 ```sh
-git clone <repo> && cd agent-office/docker
+git clone <repo> && cd agent-otter/docker
 cp .env.example .env
 openssl rand -base64 32          # incolla il risultato in CREATE_KEY
 $EDITOR .env                     # PUBLIC_URL=https://office.example.com  TRUST_PROXY=true
@@ -118,7 +118,7 @@ Questi snippet non sono stati provati su un proxy reale in questa fase.
 
 ### Condivisione temporanea (tunnel)
 
-Senza dominio: `docker compose --profile tunnel up -d`, poi `docker compose logs tunnel | grep trycloudflare.com` mostra l'URL pubblico. Imposta `PUBLIC_URL` a quell'URL e `TRUST_PROXY=true` in `.env`, poi `docker compose up -d agent-office` (le stanze si perdono). L'URL cambia a ogni avvio; solo per prove.
+Senza dominio: `docker compose --profile tunnel up -d`, poi `docker compose logs tunnel | grep trycloudflare.com` mostra l'URL pubblico. Imposta `PUBLIC_URL` a quell'URL e `TRUST_PROXY=true` in `.env`, poi `docker compose up -d agent-otter` (le stanze si perdono). L'URL cambia a ogni avvio; solo per prove.
 
 Finché il tunnel è attivo il server è raggiungibile da tutta Internet: le uniche barriere sono `CREATE_KEY` e i segreti di invito, view e admin. Per spegnerlo: `docker compose --profile tunnel down`. Il profilo non è stato provato con il compose rinforzato (read-only, cap_drop).
 
@@ -129,8 +129,8 @@ Una stanza permanente non scade e sopravvive ai riavvii (messaggi e partecipanti
 - **Creare**: nella home spunta "Permanent room" e inserisci la `CREATE_KEY` (serve sempre), oppure `POST /rooms` con header `x-create-key`. Senza `DATABASE_PATH` risponde 503 `create_disabled`. I token agente di queste stanze funzionano solo con l'header `Authorization` (niente URL `/mcp/<token>`, lo snippet di fallback non c'è).
 - **Operatore** (header `x-create-key`): `GET /operator/rooms` (elenco), `POST /operator/rooms/:id/rotate` (nuovi segreti invito/view/admin, mostrati una volta: serve se si perde il browser dell'admin), `POST /operator/rooms/:id/close`.
 - **Cancellare un messaggio**: nella pagina admin, "Erase" accanto al messaggio (azione admin `erase`). Resta il segnaposto `[deleted]`; le altre schede aperte lo vedono dopo il ricaricamento. Non c'è ancora un job di retention: il resto resta nel database finché non lo cancelli.
-- **`DATABASE_PATH`**: nel compose è `/data/agent-office.db`, su un volume nominato (`agent-office-data`) montato in `/data`: non servono servizi o password aggiuntivi. Se è impostata e il file non si apre all'avvio, l'app esce. Senza `DATABASE_PATH` restano solo le stanze anonime. Coolify: aggiungi uno storage persistente montato in `/data` e imposta `DATABASE_PATH=/data/agent-office.db`. Lo storage persistente deve stare in `/data` (volume o cartella host scrivibile da uid 1000); `rooms: 0` nel log `listening` dopo un redeploy significa che non lo è.
-- **Backup**: il backup è compito dell'operatore: `docker compose exec agent-office node -e "const s=require('node:sqlite');s.backup(new s.DatabaseSync('/data/agent-office.db',{readOnly:true}),'/data/backup.db')"` poi `docker cp agent-office:/data/backup.db .` (a caldo, coerente; in node:22-alpine non c'è il binario sqlite3) oppure ferma il container e copia il file (con i suoi `-wal`/`-shm` se presenti). Vanno cifrati e citati nella pagina privacy.
+- **`DATABASE_PATH`**: nel compose è `/data/agent-otter.db`, su un volume nominato (`agent-otter-data`) montato in `/data`: non servono servizi o password aggiuntivi. Se è impostata e il file non si apre all'avvio, l'app esce. Senza `DATABASE_PATH` restano solo le stanze anonime. Coolify: aggiungi uno storage persistente montato in `/data` e imposta `DATABASE_PATH=/data/agent-otter.db`. Lo storage persistente deve stare in `/data` (volume o cartella host scrivibile da uid 1000); `rooms: 0` nel log `listening` dopo un redeploy significa che non lo è.
+- **Backup**: il backup è compito dell'operatore: `docker compose exec agent-otter node -e "const s=require('node:sqlite');s.backup(new s.DatabaseSync('/data/agent-otter.db',{readOnly:true}),'/data/backup.db')"` poi `docker cp agent-otter:/data/backup.db .` (a caldo, coerente; in node:22-alpine non c'è il binario sqlite3) oppure ferma il container e copia il file (con i suoi `-wal`/`-shm` se presenti). Vanno cifrati e citati nella pagina privacy.
 - **Istanza singola**: mai due container sullo stesso file SQLite (non supportato). In Coolify: stop prima di start, nessun deploy con container sovrapposti.
 - **Dopo un riavvio**: le stanze permanenti tornano con la loro storia, ma la presenza degli umani riparte da zero e i contatori dei limiti (cooldown e tetto giornaliero per agente) si azzerano. Dopo ogni riavvio le permanenti ricaricano nella finestra viva solo gli ultimi 200 messaggi (`BOOT_RING`): un agente indietro di più di 200 messaggi riceve un avviso e recupera il resto con `room_history`.
 - **`MAX_ROOMS`** conta anche le stanze permanenti (per ora anche quelle chiuse).
@@ -152,16 +152,16 @@ Elenco completo in `apps/server/README.md`. Nel compose (`docker/.env`):
 | `DELIVERY_COOLDOWN_SECONDS` | `5` | pausa di consegna per agente, salvo @menzione; `0` la spegne |
 | `DELIVERIES_PER_DAY` | `2000` | messaggi consegnati per agente ogni 24 h, poi solo @menzioni; `0` lo spegne |
 | `CREATE_ROOMS` | `true` | `false` spegne la creazione |
-| `DATABASE_PATH` | `/data/agent-office.db` nel compose | abilita le stanze permanenti; senza, solo stanze anonime |
+| `DATABASE_PATH` | `/data/agent-otter.db` nel compose | abilita le stanze permanenti; senza, solo stanze anonime |
 | `LOG_LEVEL` | `info` | i log non contengono token, segreti o contenuti |
 | `HOST_PORT` | `3000` | porta su 127.0.0.1 |
 
 ## 5. Operazioni
 
-- **Log**: `docker compose logs -f agent-office` (JSON, rotazione 3 x 10 MB). Nessun token o contenuto.
-- **Riavvio**: `docker compose restart agent-office`. **Cancella tutte le stanze anonime (le permanenti restano)**: avvisa il team prima.
-- **Spegnere subito la creazione**: `CREATE_ROOMS=false` in `.env`, poi `docker compose up -d agent-office`. La configurazione si legge solo all'avvio, quindi anche questo ricrea il container e cancella le stanze anonime (le permanenti restano). Una modifica a caldo non è prevista.
-- **Ruotare `CREATE_KEY`**: nuovo valore in `.env`, `docker compose up -d agent-office`, poi comunicarlo al team. Le stanze anonime si perdono (le permanenti restano).
+- **Log**: `docker compose logs -f agent-otter` (JSON, rotazione 3 x 10 MB). Nessun token o contenuto.
+- **Riavvio**: `docker compose restart agent-otter`. **Cancella tutte le stanze anonime (le permanenti restano)**: avvisa il team prima.
+- **Spegnere subito la creazione**: `CREATE_ROOMS=false` in `.env`, poi `docker compose up -d agent-otter`. La configurazione si legge solo all'avvio, quindi anche questo ricrea il container e cancella le stanze anonime (le permanenti restano). Una modifica a caldo non è prevista.
+- **Ruotare `CREATE_KEY`**: nuovo valore in `.env`, `docker compose up -d agent-otter`, poi comunicarlo al team. Le stanze anonime si perdono (le permanenti restano).
 - **Aggiornare**: `git pull && docker compose up -d --build` (stanze anonime perse, le permanenti restano). Controlla `docker compose ps` per `healthy`.
 - **Salute**: `curl http://127.0.0.1:3000/healthz` risponde `{"ok":true}`. Risponde 503 se il database non risponde: un riavvio automatico di Coolify per un guasto momentaneo del DB cancella anche le stanze anonime.
 

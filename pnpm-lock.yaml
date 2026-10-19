@@ -10,7 +10,7 @@ importers:
 
   apps/server:
     dependencies:
-      '@agent-office/protocol':
+      '@agent-otter/protocol':
         specifier: workspace:*
         version: link:../../packages/protocol
       '@modelcontextprotocol/node':
@@ -50,7 +50,7 @@ importers:
 
   apps/web:
     dependencies:
-      '@agent-office/protocol':
+      '@agent-otter/protocol':
         specifier: workspace:*
         version: link:../../packages/protocol
       '@tanstack/react-query':
@@ -111,7 +111,7 @@ importers:
 
   e2e:
     dependencies:
-      '@agent-office/protocol':
+      '@agent-otter/protocol':
         specifier: workspace:*
         version: link:../packages/protocol
     devDependencies:
@@ -139,7 +139,7 @@ importers:
 
   e2e-hosts:
     dependencies:
-      '@agent-office/protocol':
+      '@agent-otter/protocol':
         specifier: workspace:*
         version: link:../packages/protocol
     devDependencies:

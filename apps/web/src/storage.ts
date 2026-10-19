@@ -1,5 +1,5 @@
 // Per-room secrets in localStorage (THREAT-MODEL T-07). Cleared when the room is closed or expired.
-import { ROOM_ID, SECRET } from '@agent-office/protocol';
+import { ROOM_ID, SECRET } from '@agent-otter/protocol';
 
 export type StoredRoom = { roomId: string; adminSecret: string; inviteSecret: string; viewSecret: string; expiresAt: number | null }; // null = permanent room, never expires
 const key = (id: string) => `ao:room:${id}`;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { ServerEvent } from '@agent-office/protocol';
+import type { ServerEvent } from '@agent-otter/protocol';
 import { initialRoomState, roomReducer } from '../src/roomState';
 import { backoffMs, parseFrame } from '../src/useRoomSocket';
 import { ROOM, msg, person } from './fixtures';

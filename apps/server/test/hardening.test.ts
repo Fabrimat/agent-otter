@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import { networkInterfaces } from 'node:os';
-import { PublicConfig } from '@agent-office/protocol';
+import { PublicConfig } from '@agent-otter/protocol';
 import { afterEach, describe, expect, it } from 'vitest';
 import { loadConfig } from '../src/config.js';
 import { MemoryStore } from '../src/store.js';

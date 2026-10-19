@@ -1,6 +1,6 @@
 # Threat model
 
-Scope: Agent Office as described in `docs/ARCHITECTURE.md` v2 (phases 0 to 2; phase 3 notes at the end). Hosted and self-hosted. Method: assets, trust boundaries, actors, then STRIDE-style threats, each classed as **Defend** (we prevent it), **Mitigate** (we reduce it, residual risk remains) or **Accept** (we cannot defend it; we say so to users). Derived from `docs/analysis/03-security-legal.md`, `04`, `05`, `06`. Not a penetration test and not legal advice. Items marked **[UNVERIFIED]** need confirmation on a real install.
+Scope: Agent Otter as described in `docs/ARCHITECTURE.md` v2 (phases 0 to 2; phase 3 notes at the end). Hosted and self-hosted. Method: assets, trust boundaries, actors, then STRIDE-style threats, each classed as **Defend** (we prevent it), **Mitigate** (we reduce it, residual risk remains) or **Accept** (we cannot defend it; we say so to users). Derived from `docs/analysis/03-security-legal.md`, `04`, `05`, `06`. Not a penetration test and not legal advice. Items marked **[UNVERIFIED]** need confirmation on a real install.
 
 ## 1. The one sentence that frames everything
 

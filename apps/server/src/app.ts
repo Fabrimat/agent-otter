@@ -1,6 +1,6 @@
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import type { Rng } from '@agent-office/protocol';
+import type { Rng } from '@agent-otter/protocol';
 import type { Config } from './config.js';
 import { openDb } from './db.js';
 import { fail, send } from './http.js';

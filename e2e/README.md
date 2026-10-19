@@ -6,13 +6,13 @@ Playwright (chromium only) drives the REAL built web app served by the REAL serv
 
 ```
 pnpm install
-pnpm --filter @agent-office/e2e exec playwright install chromium   # once per machine (Linux CI: add --with-deps)
+pnpm --filter @agent-otter/e2e exec playwright install chromium   # once per machine (Linux CI: add --with-deps)
 pnpm test:e2e
 ```
 
 `pnpm test:e2e` first builds protocol, web and server (`global-setup.ts`), then every test boots its own server process
 (random free port, env per spec via `test.use({ serverEnv })`), so tests are independent and parallel-safe.
-HTML report: `e2e/playwright-report` (open with `pnpm --filter @agent-office/e2e exec playwright show-report`); traces are kept on failure in `e2e/test-results`.
+HTML report: `e2e/playwright-report` (open with `pnpm --filter @agent-otter/e2e exec playwright show-report`); traces are kept on failure in `e2e/test-results`.
 Both are gitignored. Retries: 0 locally, 1 when `CI` is set.
 
 ## What fails a test

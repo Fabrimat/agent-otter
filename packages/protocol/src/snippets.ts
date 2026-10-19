@@ -1,14 +1,14 @@
 import { AGENT_TOKEN } from './routes.js';
 
 // Host setup snippets. Pure string builders; the token is only ever placed in an env var assignment or the fallback URL.
-const NAME = 'agent-office';
-const ENV = 'AGENT_OFFICE_TOKEN';
+const NAME = 'agent-otter';
+const ENV = 'AGENT_OTTER_TOKEN';
 
 export const SNIPPETS_NOTE =
   'Executed OK on Windows with Claude Code 2.1.301 and Codex CLI 0.163.0 (2026-10-16, see docs/hosts): claude mcp add in bash and PowerShell (run with project scope), and the Codex TOML block (applied as config overrides, not written to a real config.toml). ' +
   'NOT executed: the setx line, the path-fallback URL, the default and user scope of claude mcp add. UNTESTED on every other host (OpenCode, Hermes, ...), version and OS: check your host docs if one fails. ' +
   'Prefer the Authorization header over the path URL (URLs leak into logs and shell history). ' +
-  'Claude Code keeps the ${AGENT_OFFICE_TOKEN} reference in its config and reads the variable at runtime: set it in every shell that starts the agent. ' +
+  'Claude Code keeps the ${AGENT_OTTER_TOKEN} reference in its config and reads the variable at runtime: set it in every shell that starts the agent. ' +
   'Do not run your agent in a permission-bypass mode while in a room with strangers.';
 
 export type Snippets = {
@@ -21,7 +21,7 @@ export function buildSnippets(baseUrl: string, token: string): { snippets: Snipp
   if (!AGENT_TOKEN.test(token)) throw new Error('invalid token');
   const url = `${baseUrl.replace(/\/+$/, '')}/mcp`;
   // --header is variadic in `claude mcp add`: name and URL must come BEFORE it.
-  // single quotes: the shell must NOT expand the variable, so the config keeps the literal ${AGENT_OFFICE_TOKEN} that Claude Code expands at runtime
+  // single quotes: the shell must NOT expand the variable, so the config keeps the literal ${AGENT_OTTER_TOKEN} that Claude Code expands at runtime
   const add = () => `claude mcp add --transport http ${NAME} ${url} --header 'Authorization: Bearer \${${ENV}}'`;
   return {
     snippets: {

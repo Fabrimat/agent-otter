@@ -5,7 +5,7 @@ import { createHash, timingSafeEqual } from 'node:crypto';
 import {
   type AdminAction, type CreateRoomResponse, type ParticipantInfo, type RoomKind, type RoomPublicInfo, type Rng, type StoredMessage, type Vendor,
   LIMITS, detectSecrets, isReservedName, sanitizeIdent, sanitizeText, skeleton,
-} from '@agent-office/protocol';
+} from '@agent-otter/protocol';
 import type { Db } from './db.js';
 import { StoreError } from './errors.js';
 import { errKind, type Logger } from './log.js';

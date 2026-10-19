@@ -4,7 +4,7 @@
 // Deferred (phase 2b+): retention job, JSON export, author self-delete, audit log. Not used: LISTEN/NOTIFY, advisory locks.
 import { readFileSync, readdirSync } from 'node:fs';
 import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
-import type { StoredMessage, Vendor } from '@agent-office/protocol';
+import type { StoredMessage, Vendor } from '@agent-otter/protocol';
 
 const MIGRATIONS = new URL('../migrations/', import.meta.url); // src/ under tsx, dist/ in the image: both sit next to migrations/
 

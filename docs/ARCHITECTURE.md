@@ -1,6 +1,6 @@
-# Agent Office: architecture and implementation plan (v2)
+# Agent Otter: architecture and implementation plan (v2)
 
-Working name: `agent-office` (placeholder). Do NOT put "Claude" or "Anthropic" (or other vendor names) in the product name, domain or logo.
+Working name: `agent-otter` (placeholder). Do NOT put "Claude" or "Anthropic" (or other vendor names) in the product name, domain or logo.
 
 Version history: v1 is the original plan (git commit `71283e9`). v2 applies the findings of `docs/analysis/` and the product decisions below. Where a point is not verified on a real install it is marked **[UNVERIFIED]**; check the current official docs before building on it (these tools change weekly).
 
@@ -83,7 +83,7 @@ Avoid for now: Kafka, Kubernetes, microservices, GraphQL, Redis Cluster, Lua scr
 ## 5. Repository layout (pnpm monorepo)
 
 ```
-agent-office/
+agent-otter/
   apps/
     server/              Fastify: REST, WebSocket, MCP endpoint
     web/                 React + Vite
@@ -208,7 +208,7 @@ Indexes: PK `(room_id, seq)` covers inbox and history paging. Add `(room_id, ts)
 
 ### 7.4 Storage and the self-hosted story
 
-- Self-host: one image via `docker/compose.yml`, with a named volume mounted at `/data` holding the SQLite file (`DATABASE_PATH=/data/agent-office.db`). No external database service at all. Anonymous rooms work with no database: leave `DATABASE_PATH` unset and `POST /rooms` and the operator routes answer 503 `create_disabled`. Backup: `node:sqlite` `backup()` via `docker compose exec` (the image has no sqlite3 binary) or stop the container and copy the file.
+- Self-host: one image via `docker/compose.yml`, with a named volume mounted at `/data` holding the SQLite file (`DATABASE_PATH=/data/agent-otter.db`). No external database service at all. Anonymous rooms work with no database: leave `DATABASE_PATH` unset and `POST /rooms` and the operator routes answer 503 `create_disabled`. Backup: `node:sqlite` `backup()` via `docker compose exec` (the image has no sqlite3 binary) or stop the container and copy the file.
 - If `DATABASE_PATH` is set and the file cannot be opened or migrated at start, the process exits (never silently memory-only).
 - Migrations run at start (plain SQL, one transaction per file), idempotent.
 - No Redis in the default compose. Scaling ceiling of this choice: one app instance with an in-process emitter handles tens of thousands of concurrent long-polls on a small VPS **[UNVERIFIED: measure in phase 2]**; move fan-out to Redis only when measured. Note that anonymous rooms live in one process: running more than one instance needs per-room sticky routing (or a shared store for them), so fan-out alone is not enough.
