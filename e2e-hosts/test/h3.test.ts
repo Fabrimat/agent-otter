@@ -29,7 +29,8 @@ test('H3: cross-vendor conversation (human -> claude -> codex)', async () => {
   if (inRoom) human.send(`@${CC} quick question: what is 17 plus 25? Answer in the room and mention @${CX} in your answer so he can tell us double that number.`);
   const askSeq = (await room.waitFor((m) => m.from.kind === 'human', 10_000))?.seq ?? 0;
   const adaReply = await room.waitFor((m) => m.from.displayName === CC, 150_000, askSeq);
-  const boReply = adaReply ? await room.waitFor((m) => m.from.displayName === CX, 150_000, adaReply.seq) : undefined;
+  // the human's question already names @bo, so a fast codex may answer before claude does: only require that it answers after the question (the content is the model's: it once answered just 42)
+  const boReply = adaReply ? await room.waitFor((m) => m.from.displayName === CX, 150_000, askSeq) : undefined;
   const [rcc, rcx] = await runs;
   dirs.forEach(rmDir);
   const transcript = await room.transcript();
@@ -39,11 +40,12 @@ test('H3: cross-vendor conversation (human -> claude -> codex)', async () => {
     messagesExchanged: transcript.length, transcript: transcript.map((m) => ({ seq: m.seq, ts: m.ts, from: m.from.displayName, content: m.content })),
     latencyMs: {
       humanToClaudeReply: adaReply ? adaReply.ts - askedAt : null,
-      claudeReplyToCodexReply: adaReply && boReply ? boReply.ts - adaReply.ts : null,
+      claudeReplyToCodexReply: adaReply && boReply ? boReply.ts - adaReply.ts : null, // negative: codex answered first
       humanToCodexReply: boReply ? boReply.ts - askedAt : null,
     },
     receipts: human.events.filter((e) => e.type === 'receipt').map((e) => (e.type === 'receipt' ? { participantId: e.participantId, seqs: e.seqs } : null)),
     participantIds: { [CC]: ada.participantId, [CX]: bo.participantId },
+    codexSaid84: boReply ? /84/.test(boReply.content ?? '') : null,
     claudeMentionedCodex: adaReply ? adaReply.mentions.includes(CX) : false,
     perHost: {
       'claude-code': { turns: rcc.turns, costUsd: rcc.costUsd, ms: rcc.ms, inbox: inboxStats(rcc.calls), roomCalls: rcc.calls.filter(isRoomCall).map(roomTool), outside: rcc.calls.filter((c) => !isRoomCall(c) && c.tool !== 'ToolSearch').map((c) => c.tool), timedOut: rcc.timedOut, errors: rcc.calls.filter((c) => c.isError).map((c) => ({ tool: c.tool, result: (c.result ?? '').slice(0, 200) })), final: rcc.finalText.slice(0, 200) },
@@ -54,7 +56,7 @@ test('H3: cross-vendor conversation (human -> claude -> codex)', async () => {
   console.log(`[H3] joined=${inRoom} claudeReply=${!!adaReply} codexReply=${!!boReply} msgs=${transcript.length} latency=${JSON.stringify(result.latencyMs)}`);
   expect(inRoom, 'both agents must reach the room').toBe(true);
   expect(adaReply, 'claude agent did not reply to the human').toBeTruthy();
-  expect(boReply, 'codex agent did not answer after the claude agent mentioned it').toBeTruthy();
+  expect(boReply, 'codex agent did not answer the question').toBeTruthy();
 });
 
 test('H3b: loop persistence: does room_inbox(waitSeconds 25) keep going by itself in an empty room (about 170 s, no nudging)', async () => {

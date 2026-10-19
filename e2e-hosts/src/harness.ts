@@ -98,15 +98,24 @@ export const tempDir = (prefix: string) => mkdtempSync(join(tmpdir(), `ao-${pref
 export const rmDir = (d: string) => { try { rmSync(d, { recursive: true, force: true }); } catch { /* best effort */ } };
 
 // ---------------------------------------------------------------- server under test
+/**
+ * With HOSTS_REMOTE_URL set (https only) the tests run against that deployed server instead of an in-process one; HOSTS_CREATE_KEY (env only, never
+ * written to disk) is sent as the room-creation key. Only the scenarios that do not read server internals (logs) work in this mode.
+ */
 export async function startServer() {
+  const remote = process.env.HOSTS_REMOTE_URL?.replace(/\/+$/, '');
+  if (remote && !remote.startsWith('https://')) throw new Error('HOSTS_REMOTE_URL must be https://');
   const logs: string[] = [];
   const cfg = loadConfig({ PORT: '0', PUBLIC_URL: 'http://127.0.0.1', LOG_LEVEL: 'warn', MCP_CALLS_PER_MINUTE: '600', MAX_TOTAL_BYTES: String(64 * 1024 * 1024) });
-  const app = await createApp({ cfg, log: createLogger('warn', { write: (s: string) => void logs.push(s) }), createsPerHour: 1000 });
-  // listen here, NOT app.listen(): that one binds every interface. Loopback only, asserted.
-  await new Promise<void>((ok, bad) => { app.server.once('error', bad); app.server.listen(0, '127.0.0.1', ok); });
-  const a = app.server.address() as AddressInfo;
-  if (a.address !== '127.0.0.1') { await app.close(); throw new Error(`server bound to ${a.address}, expected 127.0.0.1`); }
-  const url = `http://127.0.0.1:${a.port}`;
+  const app = remote ? undefined : await createApp({ cfg, log: createLogger('warn', { write: (s: string) => void logs.push(s) }), createsPerHour: 1000 });
+  let url = remote ?? '';
+  if (app) {
+    // listen here, NOT app.listen(): that one binds every interface. Loopback only, asserted.
+    await new Promise<void>((ok, bad) => { app.server.once('error', bad); app.server.listen(0, '127.0.0.1', ok); });
+    const a = app.server.address() as AddressInfo;
+    if (a.address !== '127.0.0.1') { await app.close(); throw new Error(`server bound to ${a.address}, expected 127.0.0.1`); }
+    url = `http://127.0.0.1:${a.port}`;
+  }
   const clients: Client[] = [];
   const sockets: WebSocket[] = [];
 
@@ -184,7 +193,8 @@ export async function startServer() {
   }
 
   async function createRoom(topic = 'e2e room') {
-    const res = await api('POST', ROUTES.createRoom, { body: { topic } });
+    const key = process.env.HOSTS_CREATE_KEY;
+    const res = await api('POST', ROUTES.createRoom, { headers: key ? { [HEADERS.create]: key } : undefined, body: { topic } });
     if (res.status !== 200 && res.status !== 201) throw new Error(`create room failed: ${res.status} ${res.text}`);
     return new Room(res.json as CreateRoomResponse);
   }
@@ -194,7 +204,7 @@ export async function startServer() {
     async close() {
       for (const w of sockets) w.terminate();
       await Promise.all(clients.map((c) => c.close().catch(() => {})));
-      await app.close();
+      await app?.close();
     },
   };
 }
