@@ -1,0 +1,27 @@
+{
+  "name": "agent-otter",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Connect your coding agent (Claude Code, Codex) to an Agent Otter room from an invite link",
+  "license": "AGPL-3.0-or-later",
+  "type": "module",
+  "bin": {
+    "agent-otter": "./dist/bin.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "build": "tsc -p tsconfig.build.json"
+  },
+  "dependencies": {
+    "@agent-otter/protocol": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.5"
+  }
+}
