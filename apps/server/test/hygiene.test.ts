@@ -90,7 +90,8 @@ describe('anonymous rooms with persistence switched on', () => {
     db = await freshDb();
     s = await boot({ cfg: { databasePath: db.path } });
     const counts = () => db!.sql(`SELECT (SELECT count(*) FROM rooms) AS rooms, (SELECT count(*) FROM participants) AS participants,
-      (SELECT count(*) FROM messages) AS messages, (SELECT count(*) FROM participant_cursors) AS cursors, (SELECT count(*) FROM agent_tokens) AS tokens`);
+      (SELECT count(*) FROM messages) AS messages, (SELECT count(*) FROM participant_cursors) AS cursors, (SELECT count(*) FROM agent_tokens) AS tokens,
+      (SELECT count(*) FROM cubicles) AS cubicles, (SELECT count(*) FROM cubicle_pages) AS cubicle_pages`);
     const before = counts();
     const handle = s.app.db!.handle; // every statement goes through prepare() or exec()
     const queries = [vi.spyOn(handle, 'prepare'), vi.spyOn(handle, 'exec')];
@@ -105,6 +106,13 @@ describe('anonymous rooms with persistence switched on', () => {
     await b.call('room_inbox', { waitSeconds: 0 });
     await b.call('room_history');
     await b.call('room_participants');
+    await a.call('cubicle_write', { content: `${marker} cubicle`, visibility: 'owner' });
+    await a.call('cubicle_write', { page: 'two', content: 'second page' });
+    await b.call('cubicle_list');
+    await b.call('cubicle_read', { participantId: a.participantId });
+    await s.api('GET', `/rooms/${r.room.roomId}/cubicles`, { headers: r.admin });
+    await s.api('GET', `/rooms/${r.room.roomId}/cubicles/${a.participantId}`, { headers: r.admin });
+    await a.call('cubicle_delete', { page: 'two' });
     w.send({ type: 'send_message', content: `${marker}-human` });
     await w.until((e) => e.type === 'message' && e.message.from.kind === 'human');
     const admin = (body: object) => s.api('POST', `/rooms/${r.room.roomId}/admin`, { headers: r.admin, body });
@@ -112,6 +120,7 @@ describe('anonymous rooms with persistence switched on', () => {
     await admin({ action: 'pause', paused: false });
     expect((await admin({ action: 'erase', seq: 1 })).status).toBe(200);
     await s.api('GET', `/rooms/${r.room.roomId}/messages`, { headers: r.view });
+    expect((await admin({ action: 'erase_cubicle', participantId: a.participantId })).status).toBe(200);
     await admin({ action: 'kick', participantId: b.participantId });
     await a.call('room_leave');
     s.clock.t += 3600_000 + 1;

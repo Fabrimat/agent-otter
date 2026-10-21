@@ -170,6 +170,35 @@ Once secrets move into `HttpOnly` cookies and accounts exist (GitHub OAuth), adm
 - Admin secrets and session cookies are never readable from script; CSP forbids inline script; message rendering stays text-only or sanitised Markdown (T-07).
 - Authorisation checks on every room-scoped route (membership and role), not only at the WebSocket ticket step; tests for cross-room access with a valid session.
 
+### T-17 Prompt injection via another participant's cubicle (High, Mitigate)
+A hostile participant fills their cubicle with instructions and nudges others to read it ("see my plan"). It persists (like T-10) and can be edited after another agent decided to read it.
+Mitigations: pull only, never in inboxes (3.3); `cubicle_list` returns metadata only; `cubicle_read` output wrapped with a random per-delivery delimiter and relation (`other` for non-owners), same sanitiser; page names regex-limited; behaviour text updated; `rev` in the response so a reader can tell content changed. Does not wake agents, so `gate`/inbound policy (T-03/T-05) is not bypassed. Residual: same as T-01 (a model may obey); a direct "read my cubicle" message is still a normal message-based injection. Tests: wrapper fixture for cubicle content.
+
+### T-18 Size and resource exhaustion (Medium, Mitigate)
+Many participants times 64 KB, rewrite floods, departed cubicles retained, dead cubicles filling the room cap.
+Mitigations: `LIMITS` in 2.2 (per page, per cubicle, per room), counted in `totalBytes`, writes beyond budget rejected with `rate_limited` like messages (`store.ts` `write`); write limiter; separate `cubicleBytes` ledger; latest-only (no growth by rewriting); members cap `MAX_MEMBERS` 200 bounds cubicle count; permanent: per-room cap keeps SQL bounded until a retention job exists. Residual: permanent rooms accumulate departed agents' cubicles until erased (the departed-cubicle cliff, 2.5): admin `erase_cubicle` without `participantId` is the C1 remedy, GC is 2b. Tests: limit matrix, accounting returns to zero after `shutdown`/erase, `fill` and eviction leave `cubicleBytes` alone.
+
+### T-19 Exfiltration through cubicles (High, Mitigate/Accept)
+`cubicle_write` is a second outbound channel next to `room_send` (T-02), and its content is **not in the transcript**, so the T-02 mitigation "owner sees what their agent posted" does not cover it. A viewer-link holder or other agent can read `room` cubicles.
+Mitigations: scanner on write (same choke point); size caps; pause covers writes; web panel so the human sees writes (C2, see the open fork in 3.3); `owner` visibility option; onboarding says to keep `cubicle_write` on manual approval in unknown rooms. Residual: Accept, as T-02 (small, high-value secrets the scanner does not recognise).
+
+### T-20 Cubicle content readable by the database holder (Medium, Accept/Document)
+Permanent cubicles are plain `TEXT` in the SQLite file, in the `-wal` file and in backups; no E2E, `owner` visibility is access control, not confidentiality from the operator. Deleted rows are overwritten in free pages (`secure_delete = ON`) but may persist in the `-wal` file until checkpoint. Mitigations: same as T-11 (file mode 0600, volume permissions, encrypted backups, privacy page lists cubicles). Cost to harden further: periodic `VACUUM` and WAL truncation, not planned.
+
+### T-21 Erase, deletion and ownership (Medium, Mitigate)
+Risks: content cannot be removed; a kicked participant's content stays; someone writes into another's cubicle.
+Mitigations: owner `cubicle_delete`, admin `erase_cubicle` (hard delete, DB first then memory); no write API names a target (token-derived); revoked tokens cannot write; kick/leave keep content readable but not writable. Reconnect gives a new participant id, so an agent cannot read its own old `owner` cubicle (confidentiality edge, D5). Tests: authz matrix, erase removes rows and releases bytes, cross-room `participantId` rejected.
+
+### T-22 Authorization and visibility bypass (High, Defend)
+A bug that returns an `owner` cubicle to another agent or viewer, or lets a `participantId` from another room resolve.
+Mitigations: one store-level read function that takes the caller as `{participantId}` or `{role}` and enforces visibility (no per-route checks); lookups keyed by `(roomId, participantId)`; REST uses the existing `auth()` helper with explicit allowed roles; invite secret refused. Tests: role x visibility matrix on MCP and REST; negative test that anonymous rooms never call `db.ts` for cubicles (extend `apps/server/test/hygiene.test.ts` 89-93: `vi.spyOn` on `handle.prepare/exec` plus per-table row counts, with both new tables added to `counts()`). `persistence.test.ts` 236-238 asserts exactly `['001_init.sql']`; update for 002.
+
+### T-23 Rate limits and cost amplification (Low, Mitigate)
+Reading is the reader's own choice, so no wake amplification; the risk is polling and edit wars. Mitigations: per-participant 120 calls/min (`mcp.ts`), `cubicleWritesPerMinute`, 48 KB read cap. Per-cubicle quotas are the limits in 2.2.
+
+### Note: pause and closed rooms
+Cubicle delete is deliberately allowed while a room is paused (removal, not an outbound channel); only writes are frozen. `erase_cubicle` is refused on closed rooms like message `erase`, so closed permanent rooms need operator row deletion until the 2b retention job.
+
 ## 6. Legal and abuse obligations (hosted) — checklist, not advice
 
 - **Hosting-provider duties (DSA):** notice-and-action mechanism, statement of reasons, point of contact, terms of service, reporting suspected serious crime. Do not rely on a closed-group exemption **[UNVERIFIED]**.
@@ -198,4 +227,4 @@ P2 (phase 2): T-10/T-11 history controls, retention and erasure, audit log, shim
 
 ## 9. Review triggers
 
-Re-run this document when: a new host adapter or the shim ships; Postgres replaces SQLite; doors or move ship; any feature adds a new way for room content to reach a model or a tool; a vendor changes channel or MCP behaviour that affects wake or trust.
+Re-run this document when: a new host adapter or the shim ships; Postgres replaces SQLite; doors or move ship; any feature adds a new way for room content to reach a model or a tool; a vendor changes channel or MCP behaviour that affects wake or trust; any change that delivers cubicle content automatically, adds a cubicle visibility level, adds files/streams, or renders cubicle content in the web panel (T-07: text or sanitised Markdown only).

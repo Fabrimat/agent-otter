@@ -1,6 +1,6 @@
 // Single REST/WS/MCP contract for phase 1a: apps/server and apps/web both code against this file.
 import * as z from 'zod/v4';
-import { DeliveredMessage, ErrorCode, LIMITS, ParticipantInfo, RoomKind } from './schemas.js';
+import { DeliveredMessage, ErrorCode, LIMITS, PARTICIPANT_ID, ParticipantInfo, RoomKind, Visibility } from './schemas.js';
 
 // ---- formats (the server generates hex ids/secrets of exactly these lengths; both sides validate with these) ----
 export const ROOM_ID = /^[0-9a-f]{12}$/;
@@ -36,6 +36,11 @@ export const ROUTES = {
   admin: (id: string) => `/rooms/${rid(id)}/admin`, // POST
   messages: (id: string, q: { beforeSeq?: number; limit?: number } = {}) => `/rooms/${rid(id)}/messages${qs(q)}`, // GET
   wsTicket: (id: string) => `/rooms/${rid(id)}/ws-ticket`, // POST
+  cubicles: (id: string) => `/rooms/${rid(id)}/cubicles`, // GET, admin | view: CubiclesResponse
+  cubicle: (id: string, pid: string) => {
+    if (!PARTICIPANT_ID.test(pid)) throw new Error('invalid participant id');
+    return `/rooms/${rid(id)}/cubicles/${pid}`; // GET, admin | view: CubicleResponse
+  },
   ws: (ticket: string, lastSeq?: number) => {
     if (!TICKET.test(ticket)) throw new Error('invalid ticket');
     return `/ws${qs({ ticket, lastSeq })}`; // WebSocket upgrade
@@ -46,7 +51,7 @@ export const ROUTES = {
     return `/mcp/${token}`;
   },
   patterns: {
-    room: '/rooms/:id', join: '/rooms/:id/join', admin: '/rooms/:id/admin', messages: '/rooms/:id/messages', wsTicket: '/rooms/:id/ws-ticket', mcpFallback: '/mcp/:token',
+    room: '/rooms/:id', join: '/rooms/:id/join', admin: '/rooms/:id/admin', messages: '/rooms/:id/messages', wsTicket: '/rooms/:id/ws-ticket', cubicles: '/rooms/:id/cubicles', cubicle: '/rooms/:id/cubicles/:pid', mcpFallback: '/mcp/:token',
     operatorRotate: '/operator/rooms/:id/rotate', operatorClose: '/operator/rooms/:id/close',
   },
 } as const;
@@ -114,3 +119,20 @@ export type WsTicketResponse = z.infer<typeof WsTicketResponse>;
  * A viewer's `send_message` must produce `{type:'error', code:'forbidden_role', message}`; an admin-role sender is the room's human participant.
  */
 export const WsQuery = z.object({ ticket: z.string().regex(TICKET), lastSeq: digits.pipe(z.number().int().min(0)).optional() });
+
+/**
+ * GET /rooms/:id/cubicles and /rooms/:id/cubicles/:pid. Header accepted: HEADERS.admin | view ONLY (not invite). Admin reads every cubicle, view only
+ * `visibility: 'room'` ones (an unreadable cubicle is listed with a page count only, and its read is 403 forbidden_role). Closed rooms stay readable.
+ */
+const CubicleOwner = { participantId: z.string(), displayName: z.string(), left: z.boolean(), visibility: Visibility };
+export const CubicleSummary = z.object({
+  ...CubicleOwner, readable: z.boolean(), pageCount: z.number().int(), updatedAt: z.number().int(),
+  pages: z.array(z.object({ name: z.string(), bytes: z.number().int(), rev: z.number().int(), updatedAt: z.number().int() })).optional(), // only when readable
+});
+export type CubicleSummary = z.infer<typeof CubicleSummary>;
+export const CubiclesResponse = z.object({ cubicles: z.array(CubicleSummary) });
+export type CubiclesResponse = z.infer<typeof CubiclesResponse>;
+export const CubicleResponse = z.object({
+  ...CubicleOwner, pages: z.array(z.object({ name: z.string(), content: z.string(), bytes: z.number().int(), rev: z.number().int(), updatedAt: z.number().int() })),
+});
+export type CubicleResponse = z.infer<typeof CubicleResponse>;

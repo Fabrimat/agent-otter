@@ -1,6 +1,8 @@
 // Everything that crosses a process boundary is defined here (ARCHITECTURE sections 6, 8, 11).
 import * as z from 'zod/v4';
 
+const BYTE_CAP = 48 * 1024; // per room_inbox / room_history / cubicle_read call; a whole cubicle (cubicleBytes) fits one read by construction
+
 /** Default limits (ARCHITECTURE section 11, anonymous column). All configurable server-side; these are the protocol-level caps. */
 export const LIMITS = {
   contentBytes: 16 * 1024,
@@ -18,6 +20,12 @@ export const LIMITS = {
   historyLimitDefault: 20,
   historyLimitMax: 50,
   clientMsgIdChars: 64,
+  byteCap: BYTE_CAP,
+  cubiclePageBytes: 16 * 1024,
+  cubiclePages: 8, // per cubicle
+  cubicleBytes: BYTE_CAP, // per cubicle, sum of pages
+  cubicleBytesPerRoom: 1024 * 1024, // all cubicles of a room, departed ones included
+  cubicleWritesPerMinute: 20, // per participant
 } as const;
 
 export const Vendor = z.enum(['claude-code', 'codex', 'opencode', 'hermes', 'other']);
@@ -28,7 +36,12 @@ export type Relation = z.infer<typeof Relation>;
 
 const Kind = z.enum(['agent', 'human', 'system']);
 const utf8 = new TextEncoder();
-const Content = z.string().min(1).max(LIMITS.contentBytes).refine((s) => utf8.encode(s).length <= LIMITS.contentBytes, `content exceeds ${LIMITS.contentBytes} bytes`);
+const Text = (bytes: number) => z.string().min(1).max(bytes).refine((s) => utf8.encode(s).length <= bytes, `content exceeds ${bytes} bytes`);
+const Content = Text(LIMITS.contentBytes);
+export const PARTICIPANT_ID = /^p_[0-9a-f]{12}$/; // lives here (not routes.ts) because routes.ts imports this file
+export const PageName = z.string().regex(/^[a-z0-9][a-z0-9_.-]{0,31}$/);
+export const Visibility = z.enum(['owner', 'room']);
+export type Visibility = z.infer<typeof Visibility>;
 const Seq = z.number().int().min(0);
 const Id = z.string().min(1).max(64);
 
@@ -134,6 +147,8 @@ export const AdminAction = z.discriminatedUnion('action', [
   z.strictObject({ action: z.literal('close') }),
   z.strictObject({ action: z.literal('pause'), paused: z.boolean().default(true) }),
   z.strictObject({ action: z.literal('erase'), seq: z.number().int().min(1) }), // tombstone one message: content gone, seq kept
+  // hard-delete a cubicle (or one page of it); participantId omitted = every departed participant's cubicle (then `page` is not allowed)
+  z.strictObject({ action: z.literal('erase_cubicle'), participantId: z.string().regex(PARTICIPANT_ID).optional(), page: PageName.optional() }),
 ]);
 export type AdminAction = z.infer<typeof AdminAction>;
 
@@ -167,3 +182,8 @@ export const RoomParticipantsInput = z.object({});
 export const RoomParticipantsOutput = z.object({ you: z.string(), topic: z.string(), participants: z.array(ParticipantInfo) });
 export const RoomLeaveInput = z.object({});
 export const RoomLeaveOutput = z.object({ left: z.literal(true) });
+
+export const CubicleListInput = z.object({});
+export const CubicleReadInput = z.object({ participantId: z.string().regex(PARTICIPANT_ID).optional(), page: PageName.optional() }); // default: own cubicle, all pages
+export const CubicleWriteInput = z.object({ page: PageName.default('notes'), content: Text(LIMITS.cubiclePageBytes), visibility: Visibility.optional() });
+export const CubicleDeleteInput = z.object({ page: PageName.optional() }); // omit = the whole cubicle

@@ -3,10 +3,10 @@
 // then memory, and a database failure changes nothing in memory; advisory state (cursor) goes to memory first, the database best-effort.
 import { createHash, timingSafeEqual } from 'node:crypto';
 import {
-  type AdminAction, type CreateRoomResponse, type ParticipantInfo, type RoomKind, type RoomPublicInfo, type Rng, type StoredMessage, type Vendor,
-  LIMITS, detectSecrets, isReservedName, sanitizeIdent, sanitizeText, skeleton,
+  type AdminAction, type CreateRoomResponse, type CubicleResponse, type CubicleSummary, type ParticipantInfo, type RoomKind, type RoomPublicInfo, type Rng, type StoredMessage, type Vendor,
+  LIMITS, type Visibility, detectSecrets, isReservedName, sanitizeIdent, sanitizeText, skeleton,
 } from '@lesscubicles/protocol';
-import type { Db } from './db.js';
+import type { CubicleStats, Db } from './db.js';
 import { StoreError } from './errors.js';
 import { errKind, type Logger } from './log.js';
 import { SlidingWindow } from './ratelimit.js';
@@ -26,6 +26,9 @@ export type RoomEvent =
 export type Page = { messages: StoredMessage[]; hasMore: boolean; lastSeq: number; names: Names; adminOwnerId: string };
 export type Inbox = { messages: StoredMessage[]; hasMore: boolean; lastSeq: number; names: Names; gap?: number };
 export type JoinResult = Identity & { token: string; vendor: Vendor; cursorStartsAt: number; kind: RoomKind };
+/** Who is reading a cubicle: an agent (by participant id) or a browser role. The store enforces visibility, so no route checks it. */
+export type CubicleCaller = { participantId: string } | { role: 'admin' | 'view' };
+export type CubicleRead = CubicleResponse & { from: StoredMessage['from'] }; // `from`: the owner, for the agent-side wrapper
 export type PermanentRoomInfo = { roomId: string; topic: string; closed: boolean; lastSeq: number; activeParticipants: number };
 
 export interface RoomStore {
@@ -56,6 +59,11 @@ export interface RoomStore {
   /** Operator: fresh invite/view/admin secrets, returned once (only hashes are kept). Works on closed rooms so their history stays reachable. */
   rotateSecrets(roomId: string): Promise<Secrets>;
   permanentRooms(): PermanentRoomInfo[];
+  /** Cubicles (docs/CUBICLES-DESIGN.md). Writes and deletes are always the caller's own cubicle; reads and lists enforce visibility for `caller`. */
+  cubicleList(roomId: string, caller: CubicleCaller): Promise<CubicleSummary[]>;
+  cubicleRead(roomId: string, caller: CubicleCaller, participantId: string, page?: string): Promise<CubicleRead>;
+  cubicleWrite(roomId: string, participantId: string, input: { page: string; content: string; visibility?: Visibility }): Promise<{ page: string; rev: number; bytes: number }>;
+  cubicleDelete(roomId: string, participantId: string, page?: string): Promise<void>;
   /** Rehydrates every permanent room from the database; call once before serving. */
   load(): Promise<void>;
 }
@@ -76,18 +84,22 @@ export type MemoryStoreOptions = {
   maxTicketsPerIp?: number;
   deliveryCooldownMs?: number; // 0 disables
   deliveriesPerDay?: number; // 0 disables
+  cubicleWritesPerMinute?: number;
   db?: Db; // persistence for permanent rooms; without it only anonymous rooms exist
   log?: Logger;
 };
 
+type Cubicle = { visibility: Visibility; updatedAt: number; bytes: number; pages: Map<string, { content: string; bytes: number; rev: number; updatedAt: number }> };
 type Member = {
   id: string; ownerId: string; displayName: string; kind: 'agent' | 'human'; vendor?: Vendor; tokenHash?: string;
   cursor: number; joinSeq: number; left: boolean; conns: number; lastSeen: number | null; sent: Map<string, { seq: number; id: string }>;
   waits: Set<() => void>; // resolvers of this participant's open long-polls, oldest first
   deliveredAt: number; dayStart: number; dayCount: number; // inbound delivery policy (agents only): last non-empty batch, 24h window start, messages delivered in it
+  cubicle?: Cubicle; // anonymous rooms only (permanent cubicles are SQL-only); absent until the first write
 };
 type Room = {
   id: string; kind: RoomKind; topic: string; secrets: Secrets; adminOwnerId: string; expiresAt: number; seq: number; ring: StoredMessage[]; bytes: number;
+  cubicleBytes: number; // anonymous rooms: bytes held in member cubicles. SEPARATE from `bytes`: fill() rebuilds `bytes` and the ring eviction loop trims against it
   members: Map<string, Member>; paused: boolean; closed: boolean; closingSent: boolean; listeners: Set<(e: RoomEvent) => void>; limiter: SlidingWindow;
   writing: Promise<unknown>; // permanent rooms: tail of the per-room write chain (see serial)
 };
@@ -130,6 +142,7 @@ export class MemoryStore implements RoomStore {
   private totalBytes = 0;
   private ticketsByRoom = new Map<string, number>();
   private ticketsByIp = new Map<string, number>();
+  private cubicleLimiter: SlidingWindow; // per participant
 
   constructor(o: MemoryStoreOptions = {}) {
     this.now = o.now ?? Date.now;
@@ -141,8 +154,9 @@ export class MemoryStore implements RoomStore {
       ringSize: o.ringSize ?? LIMITS.ringSize, messagesPerMinute: o.messagesPerMinute ?? LIMITS.messagesPerMinutePerRoom,
       ttlMs: Math.min(o.ttlMs ?? LIMITS.roomTtlMs, LIMITS.roomTtlMs), ringBytes: o.ringBytes ?? 2 * 1024 * 1024, maxTotalBytes: o.maxTotalBytes ?? 256 * 1024 * 1024,
       maxWaitsPerParticipant: o.maxWaitsPerParticipant ?? 2, maxTicketsPerRoom: o.maxTicketsPerRoom ?? 50, maxTicketsPerIp: o.maxTicketsPerIp ?? 20,
-      deliveryCooldownMs: o.deliveryCooldownMs ?? 5000, deliveriesPerDay: o.deliveriesPerDay ?? 2000,
+      deliveryCooldownMs: o.deliveryCooldownMs ?? 5000, deliveriesPerDay: o.deliveriesPerDay ?? 2000, cubicleWritesPerMinute: o.cubicleWritesPerMinute ?? LIMITS.cubicleWritesPerMinute,
     };
+    this.cubicleLimiter = new SlidingWindow(this.o.cubicleWritesPerMinute, 60_000, this.now);
   }
 
   private hex = (bytes: number) => [...this.rng(bytes)].map((x) => x.toString(16).padStart(2, '0')).join('');
@@ -169,6 +183,7 @@ export class MemoryStore implements RoomStore {
     try {
       return await fn(this.db!);
     } catch (e) {
+      if (e instanceof StoreError) throw e; // a refusal raised inside the transaction (cap check), not a storage failure
       this.log?.error({ evt: 'db_error', op, err: errKind(e) });
       throw new StoreError('internal', 'storage error, try again');
     }
@@ -227,6 +242,9 @@ export class MemoryStore implements RoomStore {
     this.totalBytes -= r.bytes;
     r.bytes = 0;
     r.ring = [];
+    this.totalBytes -= r.cubicleBytes;
+    r.cubicleBytes = 0;
+    for (const m of r.members.values()) m.cubicle = undefined;
   }
   /** Replaces the ring with the newest of `asc` that fit ringSize, ringBytes and the global budget. */
   private fill(r: Room, asc: StoredMessage[]) {
@@ -243,7 +261,7 @@ export class MemoryStore implements RoomStore {
     r.ring = keep.reverse();
   }
   private room(id: string, kind: RoomKind, topic: string, secrets: Secrets, adminOwnerId: string, expiresAt: number): Room {
-    return { id, kind, topic, secrets, adminOwnerId, expiresAt, seq: 0, ring: [], bytes: 0, members: new Map(), paused: false, closed: false,
+    return { id, kind, topic, secrets, adminOwnerId, expiresAt, seq: 0, ring: [], bytes: 0, cubicleBytes: 0, members: new Map(), paused: false, closed: false,
       closingSent: false, listeners: new Set(), limiter: new SlidingWindow(this.o.messagesPerMinute, 60_000, this.now), writing: Promise.resolve() };
   }
 
@@ -540,12 +558,117 @@ export class MemoryStore implements RoomStore {
           r.bytes -= freed - cost(x);
           this.totalBytes -= freed - cost(x);
         }
+      } else if (a.action === 'erase_cubicle') {
+        if (a.page && !a.participantId) throw new StoreError('bad_request', 'page needs a participantId');
+        if (a.participantId && !r.members.has(a.participantId)) throw new StoreError('bad_request', 'unknown participant');
+        const ids = a.participantId ? [a.participantId] : [...r.members.values()].filter((m) => m.left).map((m) => m.id); // omitted: every departed participant
+        if (!(await this.eraseCubicles(r, ids, a.page)) && a.participantId) throw new StoreError('bad_request', 'no such cubicle');
       } else {
         if (perm) await this.persist('close', (d) => d.closeRoom(roomId)); // also revokes every token of the room
         r.closed = true; // the shell stays (until expiry; forever for permanent rooms) so GET reports closed:true; content, tokens and sockets are gone
         this.shutdown(r, 'closed by the room admin');
       }
     });
+  }
+
+  // ---- cubicles ----
+  private holdCubicleBytes(r: Room, d: number) {
+    r.cubicleBytes += d;
+    this.totalBytes += d; // ponytail: content bytes only, no per-page object overhead (at most 8 pages x 200 members)
+  }
+  /** Hard-deletes cubicles (or one page of `ids[0]`). Caller holds serial(). Returns how many cubicles (or pages) existed. Database first, then memory. */
+  private async eraseCubicles(r: Room, ids: string[], page?: string): Promise<number> {
+    if (r.kind === 'permanent') return page ? Number(await this.persist('cubicle_erase', (db) => db.deletePage(r.id, ids[0]!, page))) : this.persist('cubicle_erase', (db) => db.eraseCubicles(r.id, ids));
+    let n = 0;
+    for (const id of ids) {
+      const m = r.members.get(id), c = m?.cubicle;
+      const p = page ? c?.pages.get(page) : undefined;
+      if (!m || !c || (page && !p)) continue;
+      if (p) { c.pages.delete(page!); c.bytes -= p.bytes; this.holdCubicleBytes(r, -p.bytes); if (!c.pages.size) m.cubicle = undefined; }
+      else { this.holdCubicleBytes(r, -c.bytes); m.cubicle = undefined; }
+      n++;
+    }
+    return n;
+  }
+  private canRead = (caller: CubicleCaller, ownerId: string, v: Visibility) =>
+    v === 'room' || ('role' in caller ? caller.role === 'admin' : caller.participantId === ownerId);
+
+  async cubicleWrite(roomId: string, participantId: string, input: { page: string; content: string; visibility?: Visibility }) {
+    const kinds = detectSecrets(input.content); // same choke point as send()
+    if (kinds.length) throw new StoreError('secret_detected', `not written, the page looks like it contains a secret (${kinds.join(', ')}). Remove it and write again.`);
+    return this.serial(this.open(roomId), async () => {
+      const r = this.open(roomId);
+      if (r.paused) throw new StoreError('room_paused', 'room is paused by the admin');
+      const m = r.members.get(participantId);
+      if (!m || m.left) throw new StoreError('bad_request', 'not a participant of this room');
+      const content = sanitizeText(input.content, true);
+      if (!content) throw new StoreError('bad_request', 'page is empty');
+      const bytes = Buffer.byteLength(content);
+      if (bytes > LIMITS.cubiclePageBytes) throw new StoreError('payload_too_large', `page exceeds ${LIMITS.cubiclePageBytes} bytes`);
+      if (!this.cubicleLimiter.hit(participantId)) throw new StoreError('rate_limited', `cubicle write limit reached (${this.o.cubicleWritesPerMinute} per minute)`);
+      const check = (s: CubicleStats) => {
+        if (!s.hasPage && s.pages >= LIMITS.cubiclePages) throw new StoreError('payload_too_large', `a cubicle holds at most ${LIMITS.cubiclePages} pages`);
+        if (s.cubicleBytes - s.oldBytes + bytes > LIMITS.cubicleBytes) throw new StoreError('payload_too_large', `a cubicle holds at most ${LIMITS.cubicleBytes} bytes`);
+        // departed participants' cubicles count too (the departed-cubicle cliff): say how to free the space
+        if (s.roomBytes - s.oldBytes + bytes > LIMITS.cubicleBytesPerRoom) throw new StoreError('rate_limited', 'the room cubicle storage is full; the room admin can free space with the erase_cubicle action (omit participantId to erase every departed participant cubicle)');
+      };
+      const at = this.now();
+      if (r.kind === 'permanent') {
+        const rev = await this.persist('cubicle_write', (db) => db.writePage(roomId, participantId, { page: input.page, content, bytes, visibility: input.visibility, at }, check));
+        return { page: input.page, rev, bytes };
+      }
+      const old = m.cubicle?.pages.get(input.page);
+      check({ pages: m.cubicle?.pages.size ?? 0, hasPage: !!old, oldBytes: old?.bytes ?? 0, cubicleBytes: m.cubicle?.bytes ?? 0, roomBytes: r.cubicleBytes });
+      if (this.totalBytes + bytes - (old?.bytes ?? 0) > this.o.maxTotalBytes) throw new StoreError('rate_limited', 'server memory budget reached, writes are rejected until rooms expire');
+      const c = (m.cubicle ??= { visibility: 'room', updatedAt: at, bytes: 0, pages: new Map() });
+      const rev = (old?.rev ?? 0) + 1;
+      c.pages.set(input.page, { content, bytes, rev, updatedAt: at });
+      c.bytes += bytes - (old?.bytes ?? 0);
+      c.updatedAt = at;
+      if (input.visibility) c.visibility = input.visibility;
+      this.holdCubicleBytes(r, bytes - (old?.bytes ?? 0));
+      return { page: input.page, rev, bytes };
+    });
+  }
+
+  async cubicleDelete(roomId: string, participantId: string, page?: string) {
+    return this.serial(this.open(roomId), async () => {
+      const r = this.open(roomId);
+      const m = r.members.get(participantId);
+      if (!m || m.left) throw new StoreError('bad_request', 'not a participant of this room');
+      if (!(await this.eraseCubicles(r, [participantId], page))) throw new StoreError('bad_request', page ? 'no such page' : 'you have no cubicle');
+    });
+  }
+
+  async cubicleList(roomId: string, caller: CubicleCaller): Promise<CubicleSummary[]> {
+    const r = this.live(roomId); // live(), not open(): closed rooms stay readable over REST
+    if (!r) throw new StoreError('room_not_found', 'room not found');
+    const all = r.kind === 'permanent' ? await this.persist('cubicle_list', (db) => db.listCubicles(roomId)) : [...r.members.values()].flatMap((m) => !m.cubicle ? [] : [{
+      participantId: m.id, visibility: m.cubicle.visibility, updatedAt: m.cubicle.updatedAt,
+      pages: [...m.cubicle.pages].map(([name, p]) => ({ name, bytes: p.bytes, rev: p.rev, updatedAt: p.updatedAt })),
+    }]);
+    return all.flatMap((c) => {
+      const m = r.members.get(c.participantId);
+      if (!m) return [];
+      const readable = this.canRead(caller, c.participantId, c.visibility); // owner-chosen page names are content: only readers get them
+      return [{ participantId: m.id, displayName: m.displayName, left: m.left, visibility: c.visibility, readable, pageCount: c.pages.length, updatedAt: c.updatedAt, ...(readable && { pages: c.pages }) }];
+    });
+  }
+
+  async cubicleRead(roomId: string, caller: CubicleCaller, participantId: string, page?: string): Promise<CubicleRead> {
+    const r = this.live(roomId);
+    if (!r) throw new StoreError('room_not_found', 'room not found');
+    const m = r.members.get(participantId); // keyed by (room, participant): an id from another room does not resolve
+    if (!m) throw new StoreError('bad_request', 'unknown participant');
+    const c = r.kind === 'permanent' ? await this.persist('cubicle_read', (db) => db.readCubicle(roomId, participantId, page)) : m.cubicle && {
+      visibility: m.cubicle.visibility,
+      pages: [...m.cubicle.pages].filter(([name]) => !page || name === page).map(([name, p]) => ({ name, content: p.content, bytes: p.bytes, rev: p.rev, updatedAt: p.updatedAt })),
+    };
+    if (c && !this.canRead(caller, participantId, c.visibility)) throw new StoreError('forbidden_role', 'that cubicle is private to its owner');
+    return {
+      participantId, displayName: m.displayName, left: m.left, visibility: c?.visibility ?? 'room', pages: c?.pages ?? [],
+      from: { kind: m.kind, participantId: m.id, ownerId: m.ownerId, displayName: m.displayName, ...(m.vendor && { vendor: m.vendor }) },
+    };
   }
 
   async rotateSecrets(roomId: string): Promise<Secrets> {

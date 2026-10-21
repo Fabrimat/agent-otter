@@ -233,9 +233,9 @@ describe('permanent rooms on SQLite', () => {
       await x.end();
       await y.end();
     }
-    expect(db.sql('SELECT version FROM schema_migrations').map((v) => v.version)).toEqual(['001_init.sql']);
+    expect(db.sql('SELECT version FROM schema_migrations').map((v) => v.version)).toEqual(['001_init.sql', '002_cubicles.sql']);
     await start(); // booting on an already migrated database is a no-op
-    expect(db.sql('SELECT count(*) AS n FROM schema_migrations')[0].n).toBe(1);
+    expect(db.sql('SELECT count(*) AS n FROM schema_migrations')[0].n).toBe(2);
   });
 
   it('T10 drift guard: a row written behind our back is detected, the ring resyncs, no duplicate seq', async () => {

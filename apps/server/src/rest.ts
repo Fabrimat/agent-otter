@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import {
-  AdminAction, CreateRoomRequest, HEADERS, JoinRequest, LIMITS, MessagesQuery, ROOM_ID, ROUTES, buildSnippets,
-  type JoinResponse, type MessagesResponse, type OperatorRoomsResponse, type PublicConfig, type RotateSecretsResponse, type WsTicketResponse,
+  AdminAction, CreateRoomRequest, HEADERS, JoinRequest, LIMITS, MessagesQuery, PARTICIPANT_ID, ROOM_ID, ROUTES, buildSnippets,
+  type CubicleResponse, type CubiclesResponse, type JoinResponse, type MessagesResponse, type OperatorRoomsResponse, type PublicConfig, type RotateSecretsResponse, type WsTicketResponse,
 } from '@lesscubicles/protocol';
 import type { z } from 'zod/v4';
 import type { Config } from './config.js';
@@ -142,6 +142,17 @@ export function createRest(d: { store: RoomStore; log: Logger; cfg: Config; crea
       const page = await store.list(c.params.id!, { before: q.beforeSeq, limit: q.limit ?? LIMITS.historyLimitMax, maxBytes: 256 * 1024 });
       const owner = role === 'admin' ? page.adminOwnerId : ''; // a viewer owns nothing: every non-system message is 'other'
       const out: MessagesResponse = { messages: page.messages.map((m) => toDelivered(m, page.names, owner)).reverse(), hasMore: page.hasMore }; // newest first
+      send(c.res, 200, out);
+    }],
+    ['GET', compile(P.cubicles), async (c) => {
+      const role = await auth(c, ['admin', 'view']); // invite secret refused, like /messages
+      const out: CubiclesResponse = { cubicles: await store.cubicleList(c.params.id!, { role: role === 'admin' ? 'admin' : 'view' }) };
+      send(c.res, 200, out);
+    }],
+    ['GET', compile(P.cubicle), async (c) => {
+      const role = await auth(c, ['admin', 'view']);
+      if (!PARTICIPANT_ID.test(c.params.pid!)) throw new StoreError('bad_request', 'invalid participant id');
+      const { from: _from, ...out }: CubicleResponse & { from?: unknown } = await store.cubicleRead(c.params.id!, { role: role === 'admin' ? 'admin' : 'view' }, c.params.pid!);
       send(c.res, 200, out);
     }],
     ['POST', compile(P.wsTicket), async (c) => {

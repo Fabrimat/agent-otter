@@ -3,7 +3,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { createMcpHandler, McpServer } from '@modelcontextprotocol/server';
 import { toNodeHandler } from '@modelcontextprotocol/node';
 import {
-  AGENT_INSTRUCTIONS, AGENT_TOKEN, LIMITS, RoomHistoryInput, RoomInboxInput, RoomLeaveInput, RoomParticipantsInput, RoomSendInput, TOOL_DESCRIPTIONS,
+  AGENT_INSTRUCTIONS, AGENT_TOKEN, CubicleDeleteInput, CubicleListInput, CubicleReadInput, CubicleWriteInput, LIMITS, RoomHistoryInput, RoomInboxInput, RoomLeaveInput, RoomParticipantsInput, RoomSendInput, TOOL_DESCRIPTIONS,
   wrapDelivery, wrapInfoBlock, type StoredMessage,
 } from '@lesscubicles/protocol';
 import { StoreError } from './errors.js';
@@ -12,7 +12,7 @@ import { errKind, type Logger } from './log.js';
 import { SlidingWindow } from './ratelimit.js';
 import type { Identity, Names, RoomStore } from './store.js';
 
-const BYTE_CAP = 48 * 1024; // per room_inbox / room_history / piggyback call
+const BYTE_CAP = LIMITS.byteCap; // per room_inbox / room_history / piggyback / cubicle_read call
 const BODY_CAP = 64 * 1024;
 
 const text = (t: string) => ({ content: [{ type: 'text' as const, text: t }] });
@@ -84,6 +84,27 @@ export function createMcp(d: { store: RoomStore; log: Logger; now?: () => number
       const [room, list] = [await store.getRoom(who.roomId), await store.participants(who.roomId)];
       const body = `you: ${who.displayName} (${who.participantId})\ntopic: ${room?.topic ?? ''}\nparticipants: ${JSON.stringify(list)}`;
       return text(wrapInfoBlock(body));
+    }));
+
+    s.registerTool('cubicle_list', { description: TOOL_DESCRIPTIONS.cubicle_list, inputSchema: CubicleListInput }, guard(async () => {
+      const list = await store.cubicleList(who.roomId, { participantId: who.participantId });
+      return text(wrapInfoBlock(`you: ${who.displayName} (${who.participantId})
+cubicles: ${JSON.stringify(list)}`));
+    }));
+
+    s.registerTool('cubicle_read', { description: TOOL_DESCRIPTIONS.cubicle_read, inputSchema: CubicleReadInput }, guard(async ({ participantId, page }) => {
+      const c = await store.cubicleRead(who.roomId, { participantId: who.participantId }, participantId ?? who.participantId, page);
+      // one synthetic message per page (seq = rev, id = page name) so the reader gets the same random delimiter, relation and sanitiser as room messages
+      const pages: StoredMessage[] = c.pages.map((p) => ({ roomId: who.roomId, seq: p.rev, id: p.name, ts: p.updatedAt, from: c.from, content: p.content, mentions: [], hops: 0 }));
+      return text(wrap(who, pages, new Map(), null, `cubicle of ${c.displayName}; id = page, seq = rev`));
+    }));
+
+    s.registerTool('cubicle_write', { description: TOOL_DESCRIPTIONS.cubicle_write, inputSchema: CubicleWriteInput }, guard(async ({ page, content, visibility }) =>
+      text(JSON.stringify(await store.cubicleWrite(who.roomId, who.participantId, { page, content, visibility })))));
+
+    s.registerTool('cubicle_delete', { description: TOOL_DESCRIPTIONS.cubicle_delete, inputSchema: CubicleDeleteInput }, guard(async ({ page }) => {
+      await store.cubicleDelete(who.roomId, who.participantId, page);
+      return text('deleted');
     }));
 
     s.registerTool('room_leave', { description: TOOL_DESCRIPTIONS.room_leave, inputSchema: RoomLeaveInput }, guard(async () => {

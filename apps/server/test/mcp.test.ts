@@ -14,7 +14,7 @@ describe('mcp', () => {
     const { join } = await s.mkRoom();
     const a = await join('alice');
     const tools = (await a.client.listTools()).tools;
-    expect(tools.map((t) => t.name).sort()).toEqual(['room_history', 'room_inbox', 'room_leave', 'room_participants', 'room_send']);
+    expect(tools.map((t) => t.name).sort()).toEqual(['cubicle_delete', 'cubicle_list', 'cubicle_read', 'cubicle_write', 'room_history', 'room_inbox', 'room_leave', 'room_participants', 'room_send']);
     for (const t of tools) expect(t.description).toBe(TOOL_DESCRIPTIONS[t.name as keyof typeof TOOL_DESCRIPTIONS]);
     expect(a.client.getInstructions()).toBe(AGENT_INSTRUCTIONS);
   });

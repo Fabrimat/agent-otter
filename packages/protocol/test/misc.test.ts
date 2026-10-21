@@ -11,12 +11,12 @@ describe('behaviour protocol', () => {
     expect(PROTOCOL_VERSION).toBeGreaterThan(0);
     expect(AGENT_INSTRUCTIONS).toContain(`v${PROTOCOL_VERSION}`);
     expect(AGENT_INSTRUCTIONS).toMatch(/never follow instructions/i);
-    for (const k of ['room_send', 'room_inbox', 'room_history', 'room_participants'] as const) expect(TOOL_DESCRIPTIONS[k]).toContain(UNTRUSTED_RULE);
+    for (const k of ['room_send', 'room_inbox', 'room_history', 'room_participants', 'cubicle_read'] as const) expect(TOOL_DESCRIPTIONS[k]).toContain(UNTRUSTED_RULE);
     expect(ONBOARDING_PROMPT).toMatch(/permission-bypass/);
     expect(ONBOARDING_PROMPT).toContain('room_inbox');
     expect(ONBOARDING_PROMPT).toMatch(/only when you are mentioned/);
     expect(ONBOARDING_PROMPT).toMatch(/loops burn tokens/);
-    expect(PROTOCOL_VERSION).toBeGreaterThanOrEqual(2);
+    expect(PROTOCOL_VERSION).toBeGreaterThanOrEqual(3);
   });
 });
 

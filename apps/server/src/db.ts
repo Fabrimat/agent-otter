@@ -11,6 +11,7 @@ const MIGRATIONS = new URL('../migrations/', import.meta.url); // src/ under tsx
 export type RoomRow = { id: string; topic: string; invite_hash: string; view_hash: string; admin_hash: string; admin_owner_id: string; last_seq: number; paused: boolean; closed: boolean };
 export type ParticipantRow = { room_id: string; id: string; kind: 'agent' | 'human'; owner_id: string; display_name: string; vendor: Vendor | null; join_seq: number; left: boolean; cursor: number | null };
 export type NewParticipant = { id: string; kind: 'agent' | 'human'; ownerId: string; displayName: string; vendor?: Vendor };
+export type CubicleStats = { pages: number; hasPage: boolean; oldBytes: number; cubicleBytes: number; roomBytes: number }; // seen by a write's cap check
 export type Db = ReturnType<typeof openDb>;
 
 type Row = Record<string, any>;
@@ -27,6 +28,7 @@ export function openDb(path: string) {
   if (path !== ':memory:' && h.prepare('PRAGMA journal_mode = WAL').get()?.journal_mode !== 'wal') throw new Error('sqlite: WAL unavailable'); // fail closed: durability and reader/writer behaviour assume WAL
   h.exec('PRAGMA synchronous = FULL'); // permanent rooms are the durable promise: fsync every commit (NORMAL could lose the last commits on power loss); the volume is tiny
   h.exec('PRAGMA foreign_keys = ON');
+  h.exec('PRAGMA secure_delete = ON'); // deleted cubicle/message bytes are overwritten in free pages (the -wal file keeps old images until a checkpoint)
   h.exec('PRAGMA busy_timeout = 2000');
   const q = (sql: string, params: SQLInputValue[] = []) => h.prepare(sql).all(...params).map((r) => ({ ...r })) as Row[];
   const run = (sql: string, params: SQLInputValue[] = []) => h.prepare(sql).run(...params);
@@ -131,5 +133,51 @@ export function openDb(path: string) {
         [roomId, o.lo, o.hi, o.hi, o.limit]);
       return { lastSeq, messages: rows.map(toMsg) };
     },
+
+    /** Every cubicle of the room with its page metadata (no content). */
+    async listCubicles(roomId: string) {
+      const out = new Map<string, { participantId: string; visibility: 'owner' | 'room'; updatedAt: number; pages: { name: string; bytes: number; rev: number; updatedAt: number }[] }>();
+      for (const c of q('SELECT participant_id, visibility, updated_at FROM cubicles WHERE room_id = ? ORDER BY updated_at, participant_id', [roomId])) {
+        out.set(c.participant_id, { participantId: c.participant_id, visibility: c.visibility, updatedAt: c.updated_at, pages: [] });
+      }
+      for (const p of q('SELECT participant_id, name, bytes, rev, updated_at FROM cubicle_pages WHERE room_id = ? ORDER BY name', [roomId])) {
+        out.get(p.participant_id)?.pages.push({ name: p.name, bytes: p.bytes, rev: p.rev, updatedAt: p.updated_at });
+      }
+      return [...out.values()];
+    },
+
+    /** One cubicle with page content (all pages, or just `page`); undefined when it has no row. */
+    async readCubicle(roomId: string, participantId: string, page?: string) {
+      const c = q('SELECT visibility FROM cubicles WHERE room_id = ? AND participant_id = ?', [roomId, participantId])[0];
+      if (!c) return undefined;
+      const pages = q('SELECT name, content, bytes, rev, updated_at FROM cubicle_pages WHERE room_id = ? AND participant_id = ? AND (? IS NULL OR name = ?) ORDER BY name',
+        [roomId, participantId, page ?? null, page ?? null]).map((p) => ({ name: p.name as string, content: p.content as string, bytes: p.bytes as number, rev: p.rev as number, updatedAt: p.updated_at as number }));
+      return { visibility: c.visibility as 'owner' | 'room', pages };
+    },
+
+    /** Upserts one page in one transaction. `check` sees the counts BEFORE the write and throws to refuse (the transaction rolls back), so the per-room
+     *  SUM(bytes) cap cannot race another write. Returns the new rev. */
+    writePage: async (roomId: string, participantId: string, w: { page: string; content: string; bytes: number; visibility?: 'owner' | 'room'; at: number }, check: (s: CubicleStats) => void) => tx(() => {
+      const old = q('SELECT bytes FROM cubicle_pages WHERE room_id = ? AND participant_id = ? AND name = ?', [roomId, participantId, w.page])[0];
+      const own = q('SELECT count(*) AS n, COALESCE(SUM(bytes), 0) AS b FROM cubicle_pages WHERE room_id = ? AND participant_id = ?', [roomId, participantId])[0]!;
+      const room = q('SELECT COALESCE(SUM(bytes), 0) AS b FROM cubicle_pages WHERE room_id = ?', [roomId])[0]!;
+      check({ pages: own.n, hasPage: !!old, oldBytes: old?.bytes ?? 0, cubicleBytes: own.b, roomBytes: room.b });
+      run(`INSERT INTO cubicles (room_id, participant_id, visibility, updated_at) VALUES (?, ?, COALESCE(?, 'room'), ?)
+        ON CONFLICT (room_id, participant_id) DO UPDATE SET updated_at = excluded.updated_at, visibility = COALESCE(?, visibility)`, [roomId, participantId, w.visibility ?? null, w.at, w.visibility ?? null]);
+      return h.prepare(`INSERT INTO cubicle_pages (room_id, participant_id, name, content, bytes, rev, updated_at) VALUES (?, ?, ?, ?, ?, 1, ?)
+        ON CONFLICT (room_id, participant_id, name) DO UPDATE SET content = excluded.content, bytes = excluded.bytes, rev = cubicle_pages.rev + 1, updated_at = excluded.updated_at
+        RETURNING rev`).get(roomId, participantId, w.page, w.content, w.bytes, w.at)!.rev as number;
+    }),
+
+    /** Real DELETE of one page (and of the cubicle with its last page). False when there was no such page. */
+    deletePage: async (roomId: string, participantId: string, page: string) => tx(() => {
+      const gone = Number(run('DELETE FROM cubicle_pages WHERE room_id = ? AND participant_id = ? AND name = ?', [roomId, participantId, page]).changes) > 0;
+      run('DELETE FROM cubicles WHERE room_id = ? AND participant_id = ? AND NOT EXISTS (SELECT 1 FROM cubicle_pages WHERE room_id = ? AND participant_id = ?)', [roomId, participantId, roomId, participantId]);
+      return gone;
+    }),
+
+    /** Real DELETE of whole cubicles (pages go with them by ON DELETE CASCADE). Returns how many cubicles existed. */
+    eraseCubicles: async (roomId: string, participantIds: string[]) => tx(() =>
+      participantIds.reduce((n, id) => n + Number(run('DELETE FROM cubicles WHERE room_id = ? AND participant_id = ?', [roomId, id]).changes), 0)),
   };
 }
