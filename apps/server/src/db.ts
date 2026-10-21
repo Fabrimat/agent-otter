@@ -162,11 +162,13 @@ export function openDb(path: string) {
       const own = q('SELECT count(*) AS n, COALESCE(SUM(bytes), 0) AS b FROM cubicle_pages WHERE room_id = ? AND participant_id = ?', [roomId, participantId])[0]!;
       const room = q('SELECT COALESCE(SUM(bytes), 0) AS b FROM cubicle_pages WHERE room_id = ?', [roomId])[0]!;
       check({ pages: own.n, hasPage: !!old, oldBytes: old?.bytes ?? 0, cubicleBytes: own.b, roomBytes: room.b });
-      run(`INSERT INTO cubicles (room_id, participant_id, visibility, updated_at) VALUES (?, ?, COALESCE(?, 'room'), ?)
-        ON CONFLICT (room_id, participant_id) DO UPDATE SET updated_at = excluded.updated_at, visibility = COALESCE(?, visibility)`, [roomId, participantId, w.visibility ?? null, w.at, w.visibility ?? null]);
-      return h.prepare(`INSERT INTO cubicle_pages (room_id, participant_id, name, content, bytes, rev, updated_at) VALUES (?, ?, ?, ?, ?, 1, ?)
+      const visibility = h.prepare(`INSERT INTO cubicles (room_id, participant_id, visibility, updated_at) VALUES (?, ?, COALESCE(?, 'room'), ?)
+        ON CONFLICT (room_id, participant_id) DO UPDATE SET updated_at = excluded.updated_at, visibility = COALESCE(?, visibility)
+        RETURNING visibility`).get(roomId, participantId, w.visibility ?? null, w.at, w.visibility ?? null)!.visibility as 'owner' | 'room';
+      const rev = h.prepare(`INSERT INTO cubicle_pages (room_id, participant_id, name, content, bytes, rev, updated_at) VALUES (?, ?, ?, ?, ?, 1, ?)
         ON CONFLICT (room_id, participant_id, name) DO UPDATE SET content = excluded.content, bytes = excluded.bytes, rev = cubicle_pages.rev + 1, updated_at = excluded.updated_at
         RETURNING rev`).get(roomId, participantId, w.page, w.content, w.bytes, w.at)!.rev as number;
+      return { rev, visibility };
     }),
 
     /** Real DELETE of one page (and of the cubicle with its last page). False when there was no such page. */

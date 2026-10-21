@@ -91,6 +91,7 @@ export const ParticipantInfo = z.object({
   deliveryMode: z.enum(['pull', 'push']).optional(),
   lastSeen: z.number().int().nullable(),
   left: z.boolean(),
+  cubicle: z.object({ pages: z.number().int(), updatedAt: z.number().int() }).optional(), // counts only, never page names (room_participants)
 });
 export type ParticipantInfo = z.infer<typeof ParticipantInfo>;
 
@@ -157,6 +158,8 @@ export const ServerEvent = z.discriminatedUnion('type', [
   z.object({ type: z.literal('init'), roomId: z.string(), topic: z.string(), expiresAt: z.number().int().nullable(), participants: z.array(ParticipantInfo), messages: z.array(DeliveredMessage), lastSeq: Seq }),
   z.object({ type: z.literal('message'), message: DeliveredMessage }),
   z.object({ type: z.literal('participants'), participants: z.array(ParticipantInfo) }),
+  // cubicle changed: METADATA ONLY, never content. `deleted`: page (or, without `page`, the whole cubicle) is gone; rev and bytes are 0 then
+  z.object({ type: z.literal('cubicle'), participantId: z.string(), page: z.string().optional(), rev: z.number().int(), bytes: z.number().int(), updatedAt: z.number().int(), deleted: z.boolean().optional() }),
   z.object({ type: z.literal('receipt'), participantId: z.string(), seqs: z.array(Seq), at: z.number().int() }),
   z.object({ type: z.literal('room_paused'), paused: z.boolean() }),
   z.object({ type: z.literal('room_closing'), expiresAt: z.number().int() }),

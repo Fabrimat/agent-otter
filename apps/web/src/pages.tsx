@@ -127,6 +127,7 @@ function AdminRoomLive({ room }: { room: StoredRoom }) {
       <RoomView
         state={state}
         status={status}
+        cubicles={{ kind: 'admin', value: room.adminSecret }}
         admin={{
           inviteLink: `${origin}/join#${room.roomId}.${room.inviteSecret}`,
           viewLink: `${origin}/view#${room.roomId}.${room.viewSecret}`,
@@ -155,7 +156,7 @@ function ViewRoomLive({ roomId, secret }: { roomId: string; secret: string }) {
   const { state, status } = useRoomSocket(roomId, 'view', secret);
   return (
     <Page title="Read-only view">
-      <RoomView state={state} status={status} />
+      <RoomView state={state} status={status} cubicles={{ kind: 'view', value: secret }} />
     </Page>
   );
 }

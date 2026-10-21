@@ -303,3 +303,36 @@ describe('permanent cubicles on SQLite', () => {
     expect(db.sql('SELECT version FROM schema_migrations ORDER BY version').map((v) => v.version)).toEqual(['001_init.sql', '002_cubicles.sql']);
   });
 });
+
+describe.each(['anonymous', 'permanent'] as const)('cubicle WS events and participants summary in %s rooms', (kind) => {
+  it('metadata only; owner-visibility events reach admin sockets only; no content in any frame; summary has counts only', async () => {
+    await start(kind);
+    const r = await s!.mkRoom('t', kind);
+    const alice = await r.join('alice');
+    const admin = await r.ws('admin'), viewer = await r.ws('view');
+    await admin.until((e) => e.type === 'init'); await viewer.until((e) => e.type === 'init');
+
+    await alice.call('cubicle_write', { page: 'plan', content: 'SECRET-BODY room page' });
+    const ev = await viewer.until((e) => e.type === 'cubicle');
+    expect(ev).toMatchObject({ type: 'cubicle', participantId: alice.participantId, page: 'plan', rev: 1, bytes: 21 });
+    expect(Object.keys(ev).sort()).toEqual(['bytes', 'page', 'participantId', 'rev', 'type', 'updatedAt']);
+    await admin.until((e) => e.type === 'cubicle');
+
+    await alice.call('cubicle_write', { page: 'hidden', content: 'SECRET-BODY private', visibility: 'owner' }); // flips the whole cubicle to owner
+    await alice.call('cubicle_write', { page: 'hidden', content: 'SECRET-BODY again' });
+    await alice.call('cubicle_delete', { page: 'hidden' });
+    await s!.api('POST', `/rooms/${r.room.roomId}/admin`, { headers: r.admin, body: { action: 'erase_cubicle', participantId: alice.participantId } });
+    await admin.until((e) => e.type === 'cubicle' && e.deleted === true && e.page === undefined);
+    const mine = (w: typeof admin) => w.events.filter((e) => e.type === 'cubicle');
+    expect(mine(admin)).toHaveLength(5); // write, write, write, delete page, erase cubicle
+    expect(mine(viewer)).toHaveLength(1); // only the first write was room-visible
+    expect(mine(admin).at(-1)).toMatchObject({ deleted: true, rev: 0, bytes: 0 });
+    for (const w of [admin, viewer]) expect(JSON.stringify(w.events)).not.toContain('SECRET-BODY');
+
+    await alice.call('cubicle_write', { page: 'a', content: 'x' });
+    await alice.call('cubicle_write', { page: 'b', content: 'y' });
+    const t = await alice.call('room_participants');
+    expect(t).toContain('"cubicle":{"pages":2');
+    expect(t).not.toMatch(/"name"|"a"|"b"/);
+  });
+});

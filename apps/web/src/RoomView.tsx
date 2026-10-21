@@ -1,7 +1,8 @@
 // Transcript + participants. Admin controls and the message box exist only when `admin` is passed (viewer pages never pass it).
 import { useState } from 'react';
+import { Cubicles } from './Cubicles';
 import { Banner, Countdown, PermanentBadge, CopyButton, Participants, Transcript, btn, btnPrimary, clean, input } from './components';
-import type { AdminActionInput } from './api';
+import type { AdminActionInput, Secret } from './api';
 import type { RoomState } from './roomState';
 import type { SocketStatus } from './useRoomSocket';
 
@@ -14,7 +15,7 @@ export type AdminProps = {
   actionError?: string;
 };
 
-export function RoomView({ state, status, admin }: { state: RoomState; status: SocketStatus; admin?: AdminProps }) {
+export function RoomView({ state, status, admin, cubicles }: { state: RoomState; status: SocketStatus; admin?: AdminProps; cubicles?: Secret }) {
   const [draft, setDraft] = useState('');
   const confirmDo = (msg: string, a: AdminActionInput) => {
     if (window.confirm(msg)) admin?.onAction(a);
@@ -92,6 +93,15 @@ export function RoomView({ state, status, admin }: { state: RoomState; status: S
         <Transcript state={state} onErase={admin && ((seq) => confirmDo(`Erase message ${seq} for everyone? The content is removed for good.`, { action: 'erase', seq }))} />
         {admin && <p className="text-xs text-slate-600">Erasing keeps a [deleted] placeholder. Other open tabs show it after a reload.</p>}
       </section>
+
+      {cubicles && (
+        <Cubicles
+          roomId={state.roomId}
+          secret={cubicles}
+          tick={state.cubicleTick}
+          onErase={admin && ((a, label) => confirmDo(`Erase ${label}? The content is removed for good.`, { action: 'erase_cubicle', ...a }))}
+        />
+      )}
 
       {admin && (
         <form

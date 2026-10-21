@@ -97,6 +97,9 @@ export function attachWs(server: Server, d: { store: RoomStore; log: Logger; now
     const forward = (e: RoomEvent) => {
       if (e.type === 'message') emit({ type: 'message', message: toDelivered(e.message, e.names, owner()) });
       else if (e.type === 'participants') emit({ type: 'participants', participants: e.participants });
+      else if (e.type === 'cubicle') { // owner-visibility cubicles: admin sockets only; fields picked one by one so nothing else can leak
+        if (role === 'admin' || e.visibility === 'room') emit({ type: 'cubicle', participantId: e.participantId, page: e.page, rev: e.rev, bytes: e.bytes, updatedAt: e.updatedAt, deleted: e.deleted });
+      }
       else if (e.type === 'receipt') emit({ type: 'receipt', participantId: e.participantId, seqs: e.seqs, at: e.at });
       else if (e.type === 'paused') emit({ type: 'room_paused', paused: e.paused });
       else if (e.type === 'closing') emit({ type: 'room_closing', expiresAt: e.expiresAt });

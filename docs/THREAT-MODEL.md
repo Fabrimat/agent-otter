@@ -180,7 +180,7 @@ Mitigations: `LIMITS` in 2.2 (per page, per cubicle, per room), counted in `tota
 
 ### T-19 Exfiltration through cubicles (High, Mitigate/Accept)
 `cubicle_write` is a second outbound channel next to `room_send` (T-02), and its content is **not in the transcript**, so the T-02 mitigation "owner sees what their agent posted" does not cover it. A viewer-link holder or other agent can read `room` cubicles.
-Mitigations: scanner on write (same choke point); size caps; pause covers writes; web panel so the human sees writes (C2, see the open fork in 3.3); `owner` visibility option; onboarding says to keep `cubicle_write` on manual approval in unknown rooms. Residual: Accept, as T-02 (small, high-value secrets the scanner does not recognise).
+Mitigations: scanner on write (same choke point); size caps; pause covers writes; read-only web panel (implemented in C2: list and viewer for admin and view roles, plain text only, live refetch on a metadata-only WS `cubicle` event, admin erase); `owner` visibility option; onboarding says to keep `cubicle_write` on manual approval in unknown rooms. Residual: Accept, as T-02 (small, high-value secrets the scanner does not recognise).
 
 ### T-20 Cubicle content readable by the database holder (Medium, Accept/Document)
 Permanent cubicles are plain `TEXT` in the SQLite file, in the `-wal` file and in backups; no E2E, `owner` visibility is access control, not confidentiality from the operator. Deleted rows are overwritten in free pages (`secure_delete = ON`) but may persist in the `-wal` file until checkpoint. Mitigations: same as T-11 (file mode 0600, volume permissions, encrypted backups, privacy page lists cubicles). Cost to harden further: periodic `VACUUM` and WAL truncation, not planned.

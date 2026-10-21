@@ -22,7 +22,8 @@ export type RoomEvent =
   | { type: 'paused'; paused: boolean }
   | { type: 'closing'; expiresAt: number }
   | { type: 'closed'; reason: string }
-  | { type: 'kicked'; participantId: string };
+  | { type: 'kicked'; participantId: string }
+  | { type: 'cubicle'; visibility: Visibility; participantId: string; page?: string; rev: number; bytes: number; updatedAt: number; deleted?: boolean }; // metadata only; `visibility` routes it in ws.ts and is never sent
 export type Page = { messages: StoredMessage[]; hasMore: boolean; lastSeq: number; names: Names; adminOwnerId: string };
 export type Inbox = { messages: StoredMessage[]; hasMore: boolean; lastSeq: number; names: Names; gap?: number };
 export type JoinResult = Identity & { token: string; vendor: Vendor; cursorStartsAt: number; kind: RoomKind };
@@ -510,7 +511,9 @@ export class MemoryStore implements RoomStore {
   }
 
   async participants(roomId: string) {
-    return this.infos(this.open(roomId));
+    const r = this.open(roomId);
+    const mine = new Map((await this.allCubicles(r)).map((c) => [c.participantId, { pages: c.pages.length, updatedAt: c.updatedAt }]));
+    return this.infos(r).map((i) => (mine.has(i.participantId) ? { ...i, cubicle: mine.get(i.participantId)! } : i)); // counts only, no page names
   }
 
   async leave(roomId: string, participantId: string) {
@@ -576,11 +579,20 @@ export class MemoryStore implements RoomStore {
     r.cubicleBytes += d;
     this.totalBytes += d; // ponytail: content bytes only, no per-page object overhead (at most 8 pages x 200 members)
   }
+  /** Every cubicle of the room, metadata only (permanent: SQL, anonymous: memory). */
+  private async allCubicles(r: Room) {
+    if (r.kind === 'permanent') return this.persist('cubicle_list', (db) => db.listCubicles(r.id));
+    return [...r.members.values()].flatMap((m) => !m.cubicle ? [] : [{
+      participantId: m.id, visibility: m.cubicle.visibility, updatedAt: m.cubicle.updatedAt,
+      pages: [...m.cubicle.pages].map(([name, p]) => ({ name, bytes: p.bytes, rev: p.rev, updatedAt: p.updatedAt })),
+    }]);
+  }
   /** Hard-deletes cubicles (or one page of `ids[0]`). Caller holds serial(). Returns how many cubicles (or pages) existed. Database first, then memory. */
   private async eraseCubicles(r: Room, ids: string[], page?: string): Promise<number> {
-    if (r.kind === 'permanent') return page ? Number(await this.persist('cubicle_erase', (db) => db.deletePage(r.id, ids[0]!, page))) : this.persist('cubicle_erase', (db) => db.eraseCubicles(r.id, ids));
+    const vis = new Map((await this.allCubicles(r)).filter((c) => ids.includes(c.participantId)).map((c) => [c.participantId, c.visibility])); // for event routing
     let n = 0;
-    for (const id of ids) {
+    if (r.kind === 'permanent') n = page ? Number(await this.persist('cubicle_erase', (db) => db.deletePage(r.id, ids[0]!, page))) : await this.persist('cubicle_erase', (db) => db.eraseCubicles(r.id, ids));
+    else for (const id of ids) {
       const m = r.members.get(id), c = m?.cubicle;
       const p = page ? c?.pages.get(page) : undefined;
       if (!m || !c || (page && !p)) continue;
@@ -588,6 +600,7 @@ export class MemoryStore implements RoomStore {
       else { this.holdCubicleBytes(r, -c.bytes); m.cubicle = undefined; }
       n++;
     }
+    if (n) for (const [participantId, visibility] of vis) this.emit(r, { type: 'cubicle', visibility, participantId, ...(page && { page }), rev: 0, bytes: 0, updatedAt: this.now(), deleted: true });
     return n;
   }
   private canRead = (caller: CubicleCaller, ownerId: string, v: Visibility) =>
@@ -614,8 +627,9 @@ export class MemoryStore implements RoomStore {
       };
       const at = this.now();
       if (r.kind === 'permanent') {
-        const rev = await this.persist('cubicle_write', (db) => db.writePage(roomId, participantId, { page: input.page, content, bytes, visibility: input.visibility, at }, check));
-        return { page: input.page, rev, bytes };
+        const w = await this.persist('cubicle_write', (db) => db.writePage(roomId, participantId, { page: input.page, content, bytes, visibility: input.visibility, at }, check));
+        this.emit(r, { type: 'cubicle', visibility: w.visibility, participantId, page: input.page, rev: w.rev, bytes, updatedAt: at });
+        return { page: input.page, rev: w.rev, bytes };
       }
       const old = m.cubicle?.pages.get(input.page);
       check({ pages: m.cubicle?.pages.size ?? 0, hasPage: !!old, oldBytes: old?.bytes ?? 0, cubicleBytes: m.cubicle?.bytes ?? 0, roomBytes: r.cubicleBytes });
@@ -627,6 +641,7 @@ export class MemoryStore implements RoomStore {
       c.updatedAt = at;
       if (input.visibility) c.visibility = input.visibility;
       this.holdCubicleBytes(r, bytes - (old?.bytes ?? 0));
+      this.emit(r, { type: 'cubicle', visibility: c.visibility, participantId, page: input.page, rev, bytes, updatedAt: at });
       return { page: input.page, rev, bytes };
     });
   }
@@ -643,11 +658,7 @@ export class MemoryStore implements RoomStore {
   async cubicleList(roomId: string, caller: CubicleCaller): Promise<CubicleSummary[]> {
     const r = this.live(roomId); // live(), not open(): closed rooms stay readable over REST
     if (!r) throw new StoreError('room_not_found', 'room not found');
-    const all = r.kind === 'permanent' ? await this.persist('cubicle_list', (db) => db.listCubicles(roomId)) : [...r.members.values()].flatMap((m) => !m.cubicle ? [] : [{
-      participantId: m.id, visibility: m.cubicle.visibility, updatedAt: m.cubicle.updatedAt,
-      pages: [...m.cubicle.pages].map(([name, p]) => ({ name, bytes: p.bytes, rev: p.rev, updatedAt: p.updatedAt })),
-    }]);
-    return all.flatMap((c) => {
+    return (await this.allCubicles(r)).flatMap((c) => {
       const m = r.members.get(c.participantId);
       if (!m) return [];
       const readable = this.canRead(caller, c.participantId, c.visibility); // owner-chosen page names are content: only readers get them

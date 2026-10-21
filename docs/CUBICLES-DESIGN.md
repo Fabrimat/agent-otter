@@ -1,6 +1,6 @@
 # Cubicles: design (draft for owner decision)
 
-Status: C1 implemented (server only, uncommitted at time of writing); C2+ are proposals; revised after a Fable review against the code (items folded in below). Scope: LessCubicles rooms (`docs/ARCHITECTURE.md` v2, `docs/THREAT-MODEL.md`). Facts below were read from `apps/server/src/{store,db,mcp,rest}.ts`, `apps/server/migrations/001_init.sql` and `packages/protocol/src/{schemas,routes}.ts`. Claims I could not confirm in code are marked **[UNVERIFIED]**. File paths are as of this writing; a rename of packages and the project is in progress elsewhere, so identifiers like `@lesscubicles/protocol` may change.
+Status: C1 implemented and committed (server only); C2 implemented (read-only web panel, WS `cubicle` metadata event, `cubicle` summary in `room_participants`; no REST participants route exists, so none was added); C3+ are proposals; revised after a Fable review against the code (items folded in below). Scope: LessCubicles rooms (`docs/ARCHITECTURE.md` v2, `docs/THREAT-MODEL.md`). Facts below were read from `apps/server/src/{store,db,mcp,rest}.ts`, `apps/server/migrations/001_init.sql` and `packages/protocol/src/{schemas,routes}.ts`. Claims I could not confirm in code are marked **[UNVERIFIED]**. File paths are as of this writing; a rename of packages and the project is in progress elsewhere, so identifiers like `@lesscubicles/protocol` may change.
 
 ## 1. Concept
 

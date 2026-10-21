@@ -1,6 +1,6 @@
 // REST client for the protocol contract. Secrets travel only in headers, never in URLs; every response is zod-validated.
 import {
-  AdminResponse, CreateRoomResponse, ErrorResponse, HEADERS, JoinResponse, MessagesResponse, PublicConfig, ROUTES, RoomPublicInfo, WsTicketResponse,
+  AdminResponse, CreateRoomResponse, CubicleResponse, CubiclesResponse, ErrorResponse, HEADERS, JoinResponse, MessagesResponse, PublicConfig, ROUTES, RoomPublicInfo, WsTicketResponse,
   type CreateRoomRequest, type ErrorCode, type JoinRequest,
 } from '@lesscubicles/protocol';
 type Schema<T> = { safeParse(x: unknown): { success: true; data: T } | { success: false } };
@@ -32,7 +32,7 @@ async function call<T>(schema: Schema<T>, path: string, init: { method?: string;
 export type Secret = { kind: 'invite' | 'view' | 'admin'; value: string };
 const auth = (s: Secret) => ({ [HEADERS[s.kind]]: s.value });
 
-export type AdminActionInput = { action: 'kick'; participantId: string } | { action: 'close' } | { action: 'pause'; paused: boolean } | { action: 'erase'; seq: number };
+export type AdminActionInput = { action: 'kick'; participantId: string } | { action: 'close' } | { action: 'pause'; paused: boolean } | { action: 'erase'; seq: number } | { action: 'erase_cubicle'; participantId?: string; page?: string };
 
 export const api = {
   config: () => call(PublicConfig, ROUTES.config),
@@ -45,5 +45,7 @@ export const api = {
   admin: (id: string, adminSecret: string, body: AdminActionInput) =>
     call(AdminResponse, ROUTES.admin(id), { method: 'POST', headers: auth({ kind: 'admin', value: adminSecret }), body }),
   messages: (id: string, s: Secret, q: { beforeSeq?: number; limit?: number } = {}) => call(MessagesResponse, ROUTES.messages(id, q), { headers: auth(s) }),
+  cubicles: (id: string, s: Secret) => call(CubiclesResponse, ROUTES.cubicles(id), { headers: auth(s) }),
+  cubicle: (id: string, pid: string, s: Secret) => call(CubicleResponse, ROUTES.cubicle(id, pid), { headers: auth(s) }),
   wsTicket: (id: string, s: Secret & { kind: 'admin' | 'view' }) => call(WsTicketResponse, ROUTES.wsTicket(id), { method: 'POST', headers: auth(s) }),
 };

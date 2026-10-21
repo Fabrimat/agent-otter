@@ -15,11 +15,13 @@ export type RoomState = {
   closedReason?: string;
   /** receipts[seq][participantId] = seen-at (ms) */
   receipts: Record<number, Record<string, number>>;
+  /** bumped on every `init` (each (re)connect) and `cubicle` event: the cubicles panel refetches when it changes (events carry no content) */
+  cubicleTick: number;
   error?: { code: ErrorCode; message: string };
 };
 
 export const initialRoomState: RoomState = {
-  ready: false, roomId: '', topic: '', expiresAt: 0, participants: [], messages: [], lastSeq: -1, paused: false, closing: false, closed: false, receipts: {},
+  ready: false, roomId: '', topic: '', expiresAt: 0, participants: [], messages: [], lastSeq: -1, paused: false, closing: false, closed: false, receipts: {}, cubicleTick: 0,
 };
 
 function merge(have: DeliveredMessage[], incoming: DeliveredMessage[]): DeliveredMessage[] {
@@ -37,7 +39,7 @@ export function roomReducer(s: RoomState, e: ServerEvent): RoomState {
       const messages = merge(s.messages, e.messages);
       return {
         ...s, ready: true, roomId: e.roomId, topic: e.topic, expiresAt: e.expiresAt, participants: e.participants, messages,
-        lastSeq: Math.max(s.lastSeq, e.lastSeq, messages.at(-1)?.seq ?? -1), error: undefined,
+        lastSeq: Math.max(s.lastSeq, e.lastSeq, messages.at(-1)?.seq ?? -1), error: undefined, cubicleTick: s.cubicleTick + 1,
       };
     }
     case 'message': {
@@ -46,6 +48,8 @@ export function roomReducer(s: RoomState, e: ServerEvent): RoomState {
     }
     case 'participants':
       return { ...s, participants: e.participants };
+    case 'cubicle':
+      return { ...s, cubicleTick: s.cubicleTick + 1 };
     case 'receipt': {
       const receipts = { ...s.receipts };
       for (const q of e.seqs) receipts[q] = { ...receipts[q], [e.participantId]: Math.max(receipts[q]?.[e.participantId] ?? 0, e.at) };
