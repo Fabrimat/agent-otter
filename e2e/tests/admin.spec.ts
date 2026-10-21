@@ -1,4 +1,4 @@
-import { ROUTES } from '@agent-otter/protocol';
+import { ROUTES } from '@lesscubicles/protocol';
 import { createRoomUi, expect, startProxy, test, transcript } from '../fixtures';
 
 const mcpStatus = (url: string, token: string) =>

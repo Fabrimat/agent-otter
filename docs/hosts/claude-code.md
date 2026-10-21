@@ -4,32 +4,32 @@
 
 bash:
 ```bash
-export AGENT_OTTER_TOKEN=<token>
-claude mcp add --transport http agent-otter http://127.0.0.1:<port>/mcp --header 'Authorization: Bearer ${AGENT_OTTER_TOKEN}'
+export LESSCUBICLES_TOKEN=<token>
+claude mcp add --transport http lesscubicles http://127.0.0.1:<port>/mcp --header 'Authorization: Bearer ${LESSCUBICLES_TOKEN}'
 ```
 PowerShell:
 ```powershell
-$env:AGENT_OTTER_TOKEN = "<token>"
-claude mcp add --transport http agent-otter http://127.0.0.1:<port>/mcp --header 'Authorization: Bearer ${AGENT_OTTER_TOKEN}'
+$env:LESSCUBICLES_TOKEN = "<token>"
+claude mcp add --transport http lesscubicles http://127.0.0.1:<port>/mcp --header 'Authorization: Bearer ${LESSCUBICLES_TOKEN}'
 ```
-The header is single-quoted on purpose: the shell does not expand it, so the config keeps the literal `${AGENT_OTTER_TOKEN}` and Claude Code expands it when it connects (documented `.mcp.json` env expansion). The token never lands on disk. Set the variable in every shell that starts `claude`.
+The header is single-quoted on purpose: the shell does not expand it, so the config keeps the literal `${LESSCUBICLES_TOKEN}` and Claude Code expands it when it connects (documented `.mcp.json` env expansion). The token never lands on disk. Set the variable in every shell that starts `claude`.
 
-VERIFIED (both variants; evidence in the snippet section of [measured.md](measured.md)): the harness ran them verbatim in a temp project directory with `--scope project` appended, so the owner's `~/.claude.json` was never touched (the default scope is `local`, which writes `~/.claude.json`, and was not executed). Results: the stored `.mcp.json` contains the literal `${AGENT_OTTER_TOKEN}` and not the token; `claude mcp get agent-otter` does not print the token; a `claude -p` call through that `.mcp.json` sent a message into the room when the variable was set (the live calls use `--mcp-config <that .mcp.json> --strict-mcp-config`, so none of the owner's other MCP servers load); with the variable unset nothing was sent and Claude's own explanation is quoted in the results.
+VERIFIED (both variants; evidence in the snippet section of [measured.md](measured.md)): the harness ran them verbatim in a temp project directory with `--scope project` appended, so the owner's `~/.claude.json` was never touched (the default scope is `local`, which writes `~/.claude.json`, and was not executed). Results: the stored `.mcp.json` contains the literal `${LESSCUBICLES_TOKEN}` and not the token; `claude mcp get lesscubicles` does not print the token; a `claude -p` call through that `.mcp.json` sent a message into the room when the variable was set (the live calls use `--mcp-config <that .mcp.json> --strict-mcp-config`, so none of the owner's other MCP servers load); with the variable unset nothing was sent and Claude's own explanation is quoted in the results.
 
 UNVERIFIED: the default `local`/`user` scope (same command, different file), the interactive approval flow, other versions.
 
 Quirks observed:
 - `--header` is variadic: put the name and URL **before** it (the generated snippet does).
 - A project-scoped server shows `Pending approval` in `claude mcp get` until approved interactively. In `claude -p` it loads without a prompt (official docs).
-- Previous snippet (superseded): `--header "Authorization: Bearer $AGENT_OTTER_TOKEN"` with double quotes made the shell expand the token, which was then stored in clear in the config and printed by `claude mcp get`.
+- Previous snippet (superseded): `--header "Authorization: Bearer $LESSCUBICLES_TOKEN"` with double quotes made the shell expand the token, which was then stored in clear in the config and printed by `claude mcp get`.
 - If the variable is not set when `claude` starts, the server fails with HTTP 401 and its tools are missing; this is the failure mode of the new snippet after opening a new terminal.
 
 ## Non-interactive run used by the tests
 
 ```bash
-claude -p "<ONBOARDING_PROMPT ...>" --mcp-config run.json --strict-mcp-config   --allowedTools=mcp__agent-otter__room_send,mcp__agent-otter__room_inbox,mcp__agent-otter__room_history,mcp__agent-otter__room_participants,mcp__agent-otter__room_leave   --max-turns 12 --model haiku --max-budget-usd 0.25 --output-format stream-json --verbose   --no-session-persistence --setting-sources project --permission-mode default
+claude -p "<ONBOARDING_PROMPT ...>" --mcp-config run.json --strict-mcp-config   --allowedTools=mcp__lesscubicles__room_send,mcp__lesscubicles__room_inbox,mcp__lesscubicles__room_history,mcp__lesscubicles__room_participants,mcp__lesscubicles__room_leave   --max-turns 12 --model haiku --max-budget-usd 0.25 --output-format stream-json --verbose   --no-session-persistence --setting-sources project --permission-mode default
 ```
-`--allowedTools` is variadic, hence the `=` form; `AGENT_OTTER_TOKEN` is in the environment. No permission-bypass flag is used. The model id the host reported (claude-haiku-5-5 for the `haiku` alias) and the cost per run are in the recorded results.
+`--allowedTools` is variadic, hence the `=` form; `LESSCUBICLES_TOKEN` is in the environment. No permission-bypass flag is used. The model id the host reported (claude-haiku-5-5 for the `haiku` alias) and the cost per run are in the recorded results.
 
 ## What was observed (numbers: see measured.md)
 

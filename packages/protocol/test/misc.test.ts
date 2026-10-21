@@ -26,23 +26,23 @@ describe('buildSnippets', () => {
     for (const c of [s.claudeCode, s.claudeCodePowerShell]) {
       const line = c.split('\n').find((l) => l.startsWith('claude mcp add'))!;
       const a = line.split(' ');
-      expect(a.slice(0, 6)).toEqual(['claude', 'mcp', 'add', '--transport', 'http', 'agent-otter']);
+      expect(a.slice(0, 6)).toEqual(['claude', 'mcp', 'add', '--transport', 'http', 'lesscubicles']);
       expect(a[6]).toBe('https://x.example/mcp');
       expect(a[7]).toBe('--header');
-      expect(a.slice(8).join(' ')).toBe("'Authorization: Bearer ${AGENT_OTTER_TOKEN}'");
+      expect(a.slice(8).join(' ')).toBe("'Authorization: Bearer ${LESSCUBICLES_TOKEN}'");
     }
   });
-  it('header keeps a literal ${AGENT_OTTER_TOKEN} (single-quoted); token only in the assignment', () => {
-    expect(s.claudeCode).toBe(`export AGENT_OTTER_TOKEN=tok_123-ABxxxxxxxxxxxxxxxxxxxxxx
-claude mcp add --transport http agent-otter https://x.example/mcp --header 'Authorization: Bearer \${AGENT_OTTER_TOKEN}'`);
-    expect(s.claudeCodePowerShell).toContain('$env:AGENT_OTTER_TOKEN = "tok_123-ABxxxxxxxxxxxxxxxxxxxxxx"');
-    expect(s.claudeCodePowerShell).toContain("--header 'Authorization: Bearer ${AGENT_OTTER_TOKEN}'");
+  it('header keeps a literal ${LESSCUBICLES_TOKEN} (single-quoted); token only in the assignment', () => {
+    expect(s.claudeCode).toBe(`export LESSCUBICLES_TOKEN=tok_123-ABxxxxxxxxxxxxxxxxxxxxxx
+claude mcp add --transport http lesscubicles https://x.example/mcp --header 'Authorization: Bearer \${LESSCUBICLES_TOKEN}'`);
+    expect(s.claudeCodePowerShell).toContain('$env:LESSCUBICLES_TOKEN = "tok_123-ABxxxxxxxxxxxxxxxxxxxxxx"');
+    expect(s.claudeCodePowerShell).toContain("--header 'Authorization: Bearer ${LESSCUBICLES_TOKEN}'");
     expect(s.claudeCode.split('tok_123-ABxxxxxxxxxxxxxxxxxxxxxx')).toHaveLength(2);
   });
   it('codex and fallback', () => {
-    expect(s.codexConfigToml).toBe('[mcp_servers.agent-otter]\nurl = "https://x.example/mcp"\nbearer_token_env_var = "AGENT_OTTER_TOKEN"');
-    expect(s.codexEnv).toContain('export AGENT_OTTER_TOKEN=tok_123-ABxxxxxxxxxxxxxxxxxxxxxx');
-    expect(s.codexPowerShell).toContain('setx AGENT_OTTER_TOKEN');
+    expect(s.codexConfigToml).toBe('[mcp_servers.lesscubicles]\nurl = "https://x.example/mcp"\nbearer_token_env_var = "LESSCUBICLES_TOKEN"');
+    expect(s.codexEnv).toContain('export LESSCUBICLES_TOKEN=tok_123-ABxxxxxxxxxxxxxxxxxxxxxx');
+    expect(s.codexPowerShell).toContain('setx LESSCUBICLES_TOKEN');
     expect(s.pathFallbackUrl).toBe('https://x.example/mcp/tok_123-ABxxxxxxxxxxxxxxxxxxxxxx');
   });
   it('note says exactly what was executed and what was not, and keeps UNTESTED for the rest', () => {

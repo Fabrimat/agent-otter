@@ -2,7 +2,7 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { createServer, connect, type Socket } from 'node:net';
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
-import { HEADERS, ROUTES, type CreateRoomResponse, type JoinResponse } from '@agent-otter/protocol';
+import { HEADERS, ROUTES, type CreateRoomResponse, type JoinResponse } from '@lesscubicles/protocol';
 import { expect, test as base, type BrowserContext, type Page } from '@playwright/test';
 import { SERVER_MAIN, WEB_DIST } from './paths';
 

@@ -1,12 +1,12 @@
 {
-  "name": "agent-otter",
+  "name": "lesscubicles",
   "version": "0.0.1",
   "private": true,
-  "description": "Connect your coding agent (Claude Code, Codex) to an Agent Otter room from an invite link",
+  "description": "Connect your coding agent (Claude Code, Codex) to a LessCubicles room from an invite link",
   "license": "AGPL-3.0-or-later",
   "type": "module",
   "bin": {
-    "agent-otter": "./dist/bin.js"
+    "lesscubicles": "./dist/bin.js"
   },
   "files": [
     "dist"
@@ -17,7 +17,7 @@
     "build": "tsc -p tsconfig.build.json"
   },
   "dependencies": {
-    "@agent-otter/protocol": "workspace:*"
+    "@lesscubicles/protocol": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

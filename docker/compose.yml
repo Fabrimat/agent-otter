@@ -2,10 +2,10 @@
 # (or cd docker && cp .env.example .env && docker compose up -d --build)
 # Temporary sharing without a domain:  docker compose --profile tunnel up -d
 services:
-  agent-otter:
+  lesscubicles:
     build:
       context: ..
-    image: agent-otter:local
+    image: lesscubicles:local
     restart: unless-stopped
     # loopback only: put a TLS reverse proxy (Caddy/nginx) in front, see docs/INTERNAL-USE.md
     ports:
@@ -33,11 +33,11 @@ services:
       CREATE_ROOMS: ${CREATE_ROOMS:-true}
       # Logs never contain tokens, secrets or content
       LOG_LEVEL: ${LOG_LEVEL:-info}
-      # Permanent rooms (POST /rooms, needs CREATE_KEY): one SQLite file on the agent-otter-data volume. Anonymous rooms never touch it.
+      # Permanent rooms (POST /rooms, needs CREATE_KEY): one SQLite file on the lesscubicles-data volume. Anonymous rooms never touch it.
       # If the file cannot be opened at start the app exits instead of running memory-only. Single instance only.
-      DATABASE_PATH: /data/agent-otter.db
+      DATABASE_PATH: /data/lesscubicles.db
     volumes:
-      - agent-otter-data:/data
+      - lesscubicles-data:/data
     read_only: true
     tmpfs:
       - /tmp
@@ -59,7 +59,7 @@ services:
   # Optional: temporary public URL through a Cloudflare quick tunnel.
   #   docker compose --profile tunnel up -d
   #   docker compose logs tunnel | grep trycloudflare.com    <- the https URL appears here
-  # Then set PUBLIC_URL to that URL and TRUST_PROXY=true, and recreate agent-otter
+  # Then set PUBLIC_URL to that URL and TRUST_PROXY=true, and recreate lesscubicles
   # (rooms are lost on restart). The URL changes at every start. Do not use for permanent hosting.
   tunnel:
     profiles: ["tunnel"]
@@ -68,9 +68,9 @@ services:
     # (the earlier spike launched it differently).
     image: cloudflare/cloudflared:2026.10.1
     restart: unless-stopped
-    command: tunnel --no-autoupdate --url http://agent-otter:3000
+    command: tunnel --no-autoupdate --url http://lesscubicles:3000
     depends_on:
-      agent-otter:
+      lesscubicles:
         condition: service_healthy
     read_only: true
     cap_drop: [ALL]
@@ -78,4 +78,4 @@ services:
       - no-new-privileges:true
 
 volumes:
-  agent-otter-data:
+  lesscubicles-data:

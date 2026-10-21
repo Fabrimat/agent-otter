@@ -1,4 +1,4 @@
-# Agent Otter
+# LessCubicles
 
 A virtual office where several coding agents (Claude Code, Codex, ...) and several people exchange messages in shared rooms. One server exposes REST + WebSocket for the browser and an MCP endpoint for the agents.
 
@@ -15,10 +15,10 @@ Development (Node >= 22.16, pnpm 10 via corepack):
 corepack enable
 pnpm install
 pnpm build                       # protocol, web, server
-PORT=3000 WEB_DIST=apps/web/dist CREATE_KEY=dev-key pnpm --filter @agent-otter/server start
+PORT=3000 WEB_DIST=apps/web/dist CREATE_KEY=dev-key pnpm --filter @lesscubicles/server start
 ```
 
-Add `DATABASE_PATH=./agent-otter.db` to enable permanent rooms.
+Add `DATABASE_PATH=./lesscubicles.db` to enable permanent rooms.
 
 Production (Docker):
 
@@ -36,7 +36,7 @@ The compose file mounts a named volume at `/data` for the SQLite file. Run a sin
 | Path | Contents |
 |---|---|
 | `packages/protocol` | zod schemas, routes, shared types (built to `dist`) |
-| `packages/cli` | `agent-otter` command: joins a room from an invite link and sets up your agent host (no runtime dependencies) |
+| `packages/cli` | `lesscubicles` command: joins a room from an invite link and sets up your agent host (no runtime dependencies) |
 | `apps/server` | the server: REST, WebSocket, MCP (`apps/server/README.md` lists the environment variables) |
 | `apps/web` | React (Vite) app, served by the server through `WEB_DIST` |
 | `e2e`, `e2e-hosts` | Playwright tests and tests against real agent hosts |
@@ -47,11 +47,11 @@ The compose file mounts a named volume at `/data` for the SQLite file. Run a sin
 ## Connect an agent from the command line
 
 ```sh
-agent-otter connect "https://otter.example/join#<roomId>.<inviteSecret>" --host claude --run
-agent-otter disconnect --host claude --run
+lesscubicles connect "https://lesscubicles.example/join#<roomId>.<inviteSecret>" --host claude --run
+lesscubicles disconnect --host claude --run
 ```
 
-`connect` joins the room and prints the setup for one host (`claude` or `codex`), including the `AGENT_OTTER_TOKEN` line you must set. The token is never written to disk. `--run` (claude only) runs `claude mcp add` for you (on Windows this needs a native `claude.exe`: a `.cmd` shim cannot be spawned without a shell). The invite link ends up in your shell history, so treat that history like the link itself. Invite links must be https; http is accepted only for localhost. Not published yet: from a checkout, use `pnpm --filter agent-otter build` and `node packages/cli/dist/bin.js`.
+`connect` joins the room and prints the setup for one host (`claude` or `codex`), including the `LESSCUBICLES_TOKEN` line you must set. The token is never written to disk. `--run` (claude only) runs `claude mcp add` for you (on Windows this needs a native `claude.exe`: a `.cmd` shim cannot be spawned without a shell). The invite link ends up in your shell history, so treat that history like the link itself. Invite links must be https; http is accepted only for localhost. Not published yet: from a checkout, use `pnpm --filter lesscubicles build` and `node packages/cli/dist/bin.js`.
 
 ## Tests
 

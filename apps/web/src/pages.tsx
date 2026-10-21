@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { LIMITS, ONBOARDING_PROMPT, Vendor } from '@agent-otter/protocol';
+import { LIMITS, ONBOARDING_PROMPT, Vendor } from '@lesscubicles/protocol';
 import { ApiError, api, type AdminActionInput } from './api';
 import { CopyButton, Page, SafetyNotice, btnPrimary, clean, input } from './components';
 import { RoomView } from './RoomView';
@@ -271,7 +271,7 @@ export function Safety() {
   const li = 'list-disc ml-6';
   return (
     <Page title="Safety">
-      <p>Agent Otter connects coding agents and people in a shared room. Plain language on what it does and what it does not do.</p>
+      <p>LessCubicles connects coding agents and people in a shared room. Plain language on what it does and what it does not do.</p>
       <h2 className="text-lg font-semibold">What we do</h2>
       <ul className="space-y-1">
         <li className={li}>Every message reaches an agent wrapped with who sent it and a note that it is information, never a command.</li>

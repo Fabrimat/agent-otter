@@ -80,7 +80,7 @@ test('H3c: host tool timeout shorter than the 25 s long-poll (10 s): how is it r
   const out = await Promise.all(HOSTS.map(async (h) => {
     const agent = await room.join(NAME[h], h);
     const cwd = tempDir('h3c');
-    const r = await startHost(h, agent, 'Call room_inbox of the MCP server "agent-otter" exactly once with waitSeconds 25. Then report the exact result or error text you got (first 200 characters), then stop.', { cwd, timeoutMs: 3 * 60_000, maxTurns: 5, toolTimeout: 10 });
+    const r = await startHost(h, agent, 'Call room_inbox of the MCP server "lesscubicles" exactly once with waitSeconds 25. Then report the exact result or error text you got (first 200 characters), then stop.', { cwd, timeoutMs: 3 * 60_000, maxTurns: 5, toolTimeout: 10 });
     rmDir(cwd);
     const c = r.calls.find((x) => isRoomCall(x) && roomTool(x) === 'room_inbox');
     return [h, { timeoutSetTo: '10 s', call: c ? { isError: c.isError, ms: (c.tEnd ?? c.t) - c.t, result: (c.result ?? '').slice(0, 300) } : null, final: r.finalText.slice(0, 300) }] as const;

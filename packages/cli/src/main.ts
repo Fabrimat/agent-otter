@@ -1,7 +1,7 @@
 import { parseArgs } from 'node:util';
 import { spawn as nodeSpawn } from 'node:child_process';
 import { userInfo } from 'node:os';
-import { JoinResponse, ErrorResponse, ROUTES, type JoinRequest } from '@agent-otter/protocol';
+import { JoinResponse, ErrorResponse, ROUTES, type JoinRequest } from '@lesscubicles/protocol';
 import { buildConnectOutput, claudeAddArgs, claudeRemoveArgs, defaultName, disconnectOutput, parseInviteLink, VENDOR, type Host } from './core.js';
 
 export type Io = {
@@ -28,8 +28,8 @@ export const realIo = (): Io => ({
 });
 
 const USAGE = `Usage:
-  agent-otter connect <invite-link> --host claude|codex [--name <displayName>] [--run]
-  agent-otter disconnect --host claude|codex [--run]
+  lesscubicles connect <invite-link> --host claude|codex [--name <displayName>] [--run]
+  lesscubicles disconnect --host claude|codex [--run]
 
 connect joins the room and prints the setup for your host. --run (claude only) executes "claude mcp add" for you (on Windows this needs a native claude.exe: a .cmd shim cannot be spawned without a shell).
 `;
@@ -79,7 +79,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
     io.out(text);
     return values.run ? await io.spawn('claude', claudeAddArgs(origin)) : 0;
   } catch (e) {
-    io.err(`agent-otter: ${e instanceof Error ? e.message : String(e)}\n`);
+    io.err(`lesscubicles: ${e instanceof Error ? e.message : String(e)}\n`);
     return 1;
   }
 }

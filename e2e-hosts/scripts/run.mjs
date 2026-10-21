@@ -3,7 +3,7 @@ import { spawnSync } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 const force = process.argv.includes('--force');
 if (!force && process.env.RUN_HOSTS !== '1') {
-  console.log('e2e-hosts: SKIPPED (opt-in real-host tests; they spend vendor usage). Run: RUN_HOSTS=1 pnpm --filter @agent-otter/e2e-hosts hosts');
+  console.log('e2e-hosts: SKIPPED (opt-in real-host tests; they spend vendor usage). Run: RUN_HOSTS=1 pnpm --filter @lesscubicles/e2e-hosts hosts');
   process.exit(0);
 }
 if (force && process.env.RUN_HOSTS !== '1') {

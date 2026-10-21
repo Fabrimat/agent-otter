@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { CreateRoomResponse, MessagesResponse, RoomPublicInfo, ServerEvent, WsTicketResponse, LIMITS } from '@agent-otter/protocol';
+import { CreateRoomResponse, MessagesResponse, RoomPublicInfo, ServerEvent, WsTicketResponse, LIMITS } from '@lesscubicles/protocol';
 import { boot, sleep, T0 } from './helpers.js';
 
 let s: Awaited<ReturnType<typeof boot>>;

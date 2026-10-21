@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
-# Agent Otter: build protocol -> web -> server, ship only prod deps + compiled output.
-# Build from the repo root:  docker build -t agent-otter:local .
+# LessCubicles: build protocol -> web -> server, ship only prod deps + compiled output.
+# Build from the repo root:  docker build -t lesscubicles:local .
 
 # ---- 1. manifests only (cache key for the dependency layer) ----
 FROM node:22-alpine AS manifests
@@ -18,20 +18,20 @@ WORKDIR /repo
 COPY --from=manifests /m ./
 RUN --mount=type=cache,id=pnpm,target=/root/.local/share/pnpm/store \
     pnpm install --frozen-lockfile \
-      --filter @agent-otter/protocol --filter @agent-otter/web --filter @agent-otter/server
+      --filter @lesscubicles/protocol --filter @lesscubicles/web --filter @lesscubicles/server
 COPY tsconfig.base.json ./
 COPY packages/protocol packages/protocol
 COPY apps/web apps/web
 COPY apps/server apps/server
-RUN pnpm --filter @agent-otter/protocol build \
- && pnpm --filter @agent-otter/web build \
- && pnpm --filter @agent-otter/server build
+RUN pnpm --filter @lesscubicles/protocol build \
+ && pnpm --filter @lesscubicles/web build \
+ && pnpm --filter @lesscubicles/server build
 # production-only node_modules for the server (protocol is copied with its built dist)
 RUN --mount=type=cache,id=pnpm,target=/root/.local/share/pnpm/store \
-    pnpm --filter @agent-otter/server deploy --prod --legacy /out \
+    pnpm --filter @lesscubicles/server deploy --prod --legacy /out \
  && cp -r apps/server/dist /out/dist \
  && cp -r apps/server/migrations /out/migrations \
- && cd /out && node -e "import('@agent-otter/protocol').then(() => import('./dist/app.js'))"
+ && cd /out && node -e "import('@lesscubicles/protocol').then(() => import('./dist/app.js'))"
 
 # ---- 3. runtime ----
 FROM node:22-alpine

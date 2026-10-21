@@ -5,7 +5,7 @@ import { toNodeHandler } from '@modelcontextprotocol/node';
 import {
   AGENT_INSTRUCTIONS, AGENT_TOKEN, LIMITS, RoomHistoryInput, RoomInboxInput, RoomLeaveInput, RoomParticipantsInput, RoomSendInput, TOOL_DESCRIPTIONS,
   wrapDelivery, wrapInfoBlock, type StoredMessage,
-} from '@agent-otter/protocol';
+} from '@lesscubicles/protocol';
 import { StoreError } from './errors.js';
 import { send } from './http.js';
 import { errKind, type Logger } from './log.js';
@@ -37,7 +37,7 @@ export function createMcp(d: { store: RoomStore; log: Logger; now?: () => number
   }
 
   const build = ({ who, signal }: Extra) => {
-    const s = new McpServer({ name: 'agent-otter', version: '0.0.1' }, { instructions: AGENT_INSTRUCTIONS });
+    const s = new McpServer({ name: 'lesscubicles', version: '0.0.1' }, { instructions: AGENT_INSTRUCTIONS });
     // StoreError becomes a tool error the model can read; anything else propagates to the SDK (generic error to the client).
     const guard = <A>(fn: (a: A) => Promise<ReturnType<typeof text>>) => async (a: A) => {
       if (!calls.hit(who.participantId)) {

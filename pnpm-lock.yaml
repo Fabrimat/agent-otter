@@ -10,7 +10,7 @@ importers:
 
   apps/server:
     dependencies:
-      '@agent-otter/protocol':
+      '@lesscubicles/protocol':
         specifier: workspace:*
         version: link:../../packages/protocol
       '@modelcontextprotocol/node':
@@ -50,7 +50,7 @@ importers:
 
   apps/web:
     dependencies:
-      '@agent-otter/protocol':
+      '@lesscubicles/protocol':
         specifier: workspace:*
         version: link:../../packages/protocol
       '@tanstack/react-query':
@@ -111,7 +111,7 @@ importers:
 
   e2e:
     dependencies:
-      '@agent-otter/protocol':
+      '@lesscubicles/protocol':
         specifier: workspace:*
         version: link:../packages/protocol
     devDependencies:
@@ -139,7 +139,7 @@ importers:
 
   e2e-hosts:
     dependencies:
-      '@agent-otter/protocol':
+      '@lesscubicles/protocol':
         specifier: workspace:*
         version: link:../packages/protocol
     devDependencies:
@@ -170,7 +170,7 @@ importers:
 
   packages/cli:
     dependencies:
-      '@agent-otter/protocol':
+      '@lesscubicles/protocol':
         specifier: workspace:*
         version: link:../protocol
     devDependencies:

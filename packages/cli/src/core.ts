@@ -1,4 +1,4 @@
-import { buildSnippets, LIMITS, ROOM_ID, SECRET, Vendor } from '@agent-otter/protocol';
+import { buildSnippets, LIMITS, ROOM_ID, SECRET, Vendor } from '@lesscubicles/protocol';
 
 export type Host = 'claude' | 'codex';
 export const VENDOR: Record<Host, Vendor> = { claude: 'claude-code', codex: 'codex' };
@@ -21,8 +21,8 @@ export const defaultName = (user: string, host: Host) => `${user}-${host}`.slice
 
 /** The `claude mcp add` argv (no token: the header keeps the literal variable reference). */
 export const claudeAddArgs = (origin: string) =>
-  ['mcp', 'add', '--transport', 'http', 'agent-otter', `${origin}/mcp`, '--header', 'Authorization: Bearer ${AGENT_OTTER_TOKEN}'];
-export const claudeRemoveArgs = ['mcp', 'remove', 'agent-otter'];
+  ['mcp', 'add', '--transport', 'http', 'lesscubicles', `${origin}/mcp`, '--header', 'Authorization: Bearer ${LESSCUBICLES_TOKEN}'];
+export const claudeRemoveArgs = ['mcp', 'remove', 'lesscubicles'];
 
 /**
  * What to print after a join. Built locally from the token only: nothing else in the server's response (snippets, note) is ever printed.
@@ -37,5 +37,5 @@ export function buildConnectOutput(host: Host, origin: string, token: string, pl
 }
 
 export const disconnectOutput = (host: Host) =>
-  host === 'claude' ? 'claude mcp remove agent-otter\n'
-    : 'Remove the [mcp_servers.agent-otter] block from ~/.codex/config.toml and unset AGENT_OTTER_TOKEN.\n';
+  host === 'claude' ? 'claude mcp remove lesscubicles\n'
+    : 'Remove the [mcp_servers.lesscubicles] block from ~/.codex/config.toml and unset LESSCUBICLES_TOKEN.\n';

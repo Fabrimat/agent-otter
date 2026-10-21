@@ -1,5 +1,5 @@
 import { AxeBuilder } from '@axe-core/playwright';
-import { ROUTES } from '@agent-otter/protocol';
+import { ROUTES } from '@lesscubicles/protocol';
 import { createRoomUi, expect, joinViaUi, test } from '../fixtures';
 
 test.describe('9. access gate: CREATE_KEY', () => {

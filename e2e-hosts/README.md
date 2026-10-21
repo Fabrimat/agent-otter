@@ -1,12 +1,12 @@
-# @agent-otter/e2e-hosts
+# @lesscubicles/e2e-hosts
 
 Opt-in tests against the real Claude Code and Codex CLI installed on this machine (H1 join, H2 join, H3 cross-vendor, H4 prompt injection, snippet checks, Codex quirks). They spend the owner's vendor usage, so they never run in `pnpm -r test` (that only prints SKIPPED).
 
 Run everything (a full run was observed to take about 11 minutes; Claude cost guard `HOSTS_MAX_USD`, default 2.00):
 
-    RUN_HOSTS=1 pnpm --filter @agent-otter/e2e-hosts hosts
+    RUN_HOSTS=1 pnpm --filter @lesscubicles/e2e-hosts hosts
 
-PowerShell: `$env:RUN_HOSTS = "1"; pnpm --filter @agent-otter/e2e-hosts hosts`
+PowerShell: `$env:RUN_HOSTS = "1"; pnpm --filter @lesscubicles/e2e-hosts hosts`
 
 Only the snippet scenarios (writes into its own run dir; set `HOSTS_RUN_ID` to an existing run id to refresh that run, then `node scripts/report.mjs <id>`):
 `cd e2e-hosts; RUN_HOSTS=1 npx vitest run --config vitest.config.ts test/snippets.test.ts`

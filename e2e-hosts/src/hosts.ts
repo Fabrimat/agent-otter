@@ -4,7 +4,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } fr
 import { join } from 'node:path';
 import { MAX_USD, RESULTS_DIR, hostEnv, run, type AgentT, type RunResult } from './harness.js';
 
-export const SERVER_NAME = 'agent-otter';
+export const SERVER_NAME = 'lesscubicles';
 export const ROOM_TOOLS = ['room_send', 'room_inbox', 'room_history', 'room_participants', 'room_leave'] as const;
 export const mcpName = (t: string) => `mcp__${SERVER_NAME}__${t}`;
 
@@ -63,7 +63,7 @@ export async function runClaude(o: ClaudeOpts): Promise<HostRun> {
   const runId = `${process.pid}-${Math.random().toString(36).slice(2)}`;
   book(runId, budget); // reserve before launch
   const cfgPath = join(o.cwd, `.mcp-run-${o.agent.name}.json`);
-  writeFileSync(cfgPath, JSON.stringify({ mcpServers: { [SERVER_NAME]: { type: 'http', url: o.agent.mcpUrl, headers: { Authorization: 'Bearer ${AGENT_OTTER_TOKEN}' } } } }));
+  writeFileSync(cfgPath, JSON.stringify({ mcpServers: { [SERVER_NAME]: { type: 'http', url: o.agent.mcpUrl, headers: { Authorization: 'Bearer ${LESSCUBICLES_TOKEN}' } } } }));
   const allowed = [...ROOM_TOOLS.map(mcpName), ...(o.allowTools ?? [])];
   const args = [
     '-p', o.prompt,
@@ -78,7 +78,7 @@ export async function runClaude(o: ClaudeOpts): Promise<HostRun> {
     '--setting-sources', 'project',
     '--permission-mode', 'default',
   ];
-  const r = await run('claude', args, { cwd: o.cwd, timeoutMs: o.timeoutMs, env: hostEnv({ AGENT_OTTER_TOKEN: o.agent.token, ...(o.toolTimeoutMs ? { MCP_TOOL_TIMEOUT: String(o.toolTimeoutMs) } : {}) }) });
+  const r = await run('claude', args, { cwd: o.cwd, timeoutMs: o.timeoutMs, env: hostEnv({ LESSCUBICLES_TOKEN: o.agent.token, ...(o.toolTimeoutMs ? { MCP_TOOL_TIMEOUT: String(o.toolTimeoutMs) } : {}) }) });
   if (/session limit|usage limit|rate limit exceeded/i.test(r.stderr + r.stdout.slice(0, 2000)) && r.code !== 0) throw new Error('Claude usage limit reached (host said: ' + (r.stderr || r.stdout).slice(0, 120).trim() + '): this is not a product failure; re-run after the reset');
   const ev = parseLines(r);
   const calls: ToolCall[] = [];
@@ -116,14 +116,14 @@ export async function runCodex(o: CodexOpts): Promise<HostRun> {
     '-C', o.cwd, '-s', 'read-only', '-m', o.model ?? codexModel(),
     '-c', 'model_reasoning_effort="low"',
     '-c', `${s}.url=${JSON.stringify(o.agent.mcpUrl)}`,
-    '-c', `${s}.bearer_token_env_var="AGENT_OTTER_TOKEN"`,
+    '-c', `${s}.bearer_token_env_var="LESSCUBICLES_TOKEN"`,
     ...(o.noApprove ? [] : ['-c', `${s}.default_tools_approval_mode="approve"`]), // MCP room tools auto-approved; shell stays read-only/sandboxed
     '-c', 'approval_policy="never"',
     ...(o.noShell ? ['--disable', 'shell_tool', '--disable', 'unified_exec'] : []),
     ...(o.toolTimeoutSec ? ['-c', `${s}.tool_timeout_sec=${o.toolTimeoutSec}`] : []),
     o.prompt,
   ];
-  const r = await run('codex', args, { cwd: o.cwd, timeoutMs: o.timeoutMs, env: hostEnv({ AGENT_OTTER_TOKEN: o.agent.token }) });
+  const r = await run('codex', args, { cwd: o.cwd, timeoutMs: o.timeoutMs, env: hostEnv({ LESSCUBICLES_TOKEN: o.agent.token }) });
   const ev = parseLines(r);
   const calls: ToolCall[] = [];
   let finalText = '', turns = 0, usage: unknown;

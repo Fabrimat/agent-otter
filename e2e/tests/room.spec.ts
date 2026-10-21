@@ -1,4 +1,4 @@
-import { ROUTES } from '@agent-otter/protocol';
+import { ROUTES } from '@lesscubicles/protocol';
 import { WebSocket } from 'ws';
 import { createRoomUi, expect, joinViaUi, roomFromStorage, test, transcript } from '../fixtures';
 
@@ -35,14 +35,14 @@ test('2. invite link in a second context: join form, snippets, onboarding prompt
   const mcp = `${server.url}/mcp`;
   for (const name of ['Claude Code (bash)', 'Claude Code (PowerShell)']) {
     const t = await sec(name).innerText();
-    // single quotes: the shell must NOT expand the token, Claude expands ${AGENT_OTTER_TOKEN} at runtime (T-04)
-    expect(t, name).toContain(`claude mcp add --transport http agent-otter ${mcp} --header 'Authorization: Bearer \${AGENT_OTTER_TOKEN}'`);
+    // single quotes: the shell must NOT expand the token, Claude expands ${LESSCUBICLES_TOKEN} at runtime (T-04)
+    expect(t, name).toContain(`claude mcp add --transport http lesscubicles ${mcp} --header 'Authorization: Bearer \${LESSCUBICLES_TOKEN}'`);
     expect(t.indexOf(mcp), `${name}: URL before --header`).toBeLessThan(t.indexOf('--header'));
   }
-  await expect(sec('Claude Code (PowerShell)')).toContainText('$env:AGENT_OTTER_TOKEN');
+  await expect(sec('Claude Code (PowerShell)')).toContainText('$env:LESSCUBICLES_TOKEN');
   await expect(sec('Codex: config.toml')).toContainText(`url = "${mcp}"`);
-  await expect(sec('Codex: environment (bash)')).toContainText('AGENT_OTTER_TOKEN=');
-  await expect(sec('Codex: environment (PowerShell)')).toContainText('setx AGENT_OTTER_TOKEN');
+  await expect(sec('Codex: environment (bash)')).toContainText('LESSCUBICLES_TOKEN=');
+  await expect(sec('Codex: environment (PowerShell)')).toContainText('setx LESSCUBICLES_TOKEN');
   await expect(sec(/Fallback MCP URL/)).toContainText(`${mcp}/`);
   await expect(guest.getByRole('region', { name: 'Onboarding prompt' })).toBeVisible();
   await expect(guest.getByText(/UNTESTED/)).toBeVisible();

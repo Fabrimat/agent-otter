@@ -2,7 +2,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import {
   AdminAction, CreateRoomRequest, HEADERS, JoinRequest, LIMITS, MessagesQuery, ROOM_ID, ROUTES, buildSnippets,
   type JoinResponse, type MessagesResponse, type OperatorRoomsResponse, type PublicConfig, type RotateSecretsResponse, type WsTicketResponse,
-} from '@agent-otter/protocol';
+} from '@lesscubicles/protocol';
 import type { z } from 'zod/v4';
 import type { Config } from './config.js';
 import { toDelivered } from './deliver.js';

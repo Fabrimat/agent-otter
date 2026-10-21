@@ -1,6 +1,6 @@
 // Live room connection: one-time ticket -> WS with lastSeq -> validated events -> reducer. Reconnects with backoff and a NEW ticket.
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
-import { ROUTES, ServerEvent, type ClientCommand } from '@agent-otter/protocol';
+import { ROUTES, ServerEvent, type ClientCommand } from '@lesscubicles/protocol';
 import { ApiError, api } from './api';
 import { initialRoomState, roomReducer } from './roomState';
 

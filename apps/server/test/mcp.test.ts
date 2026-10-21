@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { AGENT_INSTRUCTIONS, TOOL_DESCRIPTIONS } from '@agent-otter/protocol';
+import { AGENT_INSTRUCTIONS, TOOL_DESCRIPTIONS } from '@lesscubicles/protocol';
 import { boot, headers, sleep } from './helpers.js';
 
 let s: Awaited<ReturnType<typeof boot>>;

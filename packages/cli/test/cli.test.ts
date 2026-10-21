@@ -1,4 +1,4 @@
-import { buildSnippets, type JoinResponse } from '@agent-otter/protocol';
+import { buildSnippets, type JoinResponse } from '@lesscubicles/protocol';
 import { describe, expect, it } from 'vitest';
 import { parseInviteLink } from '../src/core.js';
 import { run, type Io } from '../src/main.js';
@@ -41,7 +41,7 @@ describe('connect', () => {
     expect(await run(['connect', link(), '--host', 'claude'], h.io)).toBe(0);
     expect(h.fetched[0]).toEqual({ url: `https://otter.example/rooms/${ROOM}/join`, body: { inviteSecret: SEC, displayName: 'alice-claude', vendor: 'claude-code' } });
     const text = h.out.join('');
-    expect(text).toContain(`export AGENT_OTTER_TOKEN=${TOKEN}`);
+    expect(text).toContain(`export LESSCUBICLES_TOKEN=${TOKEN}`);
     expect(text).toContain('claude mcp add');
     expect(text).not.toContain('/mcp/' + TOKEN);
     expect(text).not.toContain('mcp_servers');
@@ -50,21 +50,21 @@ describe('connect', () => {
   it('prints the PowerShell variant on win32', async () => {
     const h = harness({ platform: 'win32' });
     await run(['connect', link(), '--host', 'claude'], h.io);
-    expect(h.out.join('')).toContain('$env:AGENT_OTTER_TOKEN');
+    expect(h.out.join('')).toContain('$env:LESSCUBICLES_TOKEN');
   });
   it('prints the codex toml and env line', async () => {
     const h = harness();
     await run(['connect', link(), '--host', 'codex', '--name', 'bob'], h.io);
     expect(h.fetched[0]!.body).toMatchObject({ displayName: 'bob', vendor: 'codex' });
-    expect(h.out.join('')).toContain('[mcp_servers.agent-otter]');
-    expect(h.out.join('')).toContain(`export AGENT_OTTER_TOKEN=${TOKEN}`);
+    expect(h.out.join('')).toContain('[mcp_servers.lesscubicles]');
+    expect(h.out.join('')).toContain(`export LESSCUBICLES_TOKEN=${TOKEN}`);
   });
   it('--run executes the exact argv without a shell and without the token', async () => {
     const h = harness();
     expect(await run(['connect', link(), '--host', 'claude', '--run'], h.io)).toBe(0);
-    expect(h.spawned).toEqual([{ cmd: 'claude', args: ['mcp', 'add', '--transport', 'http', 'agent-otter', 'https://otter.example/mcp', '--header', 'Authorization: Bearer ${AGENT_OTTER_TOKEN}'] }]);
+    expect(h.spawned).toEqual([{ cmd: 'claude', args: ['mcp', 'add', '--transport', 'http', 'lesscubicles', 'https://otter.example/mcp', '--header', 'Authorization: Bearer ${LESSCUBICLES_TOKEN}'] }]);
     expect(JSON.stringify(h.spawned)).not.toContain(TOKEN);
-    expect(h.out.join('')).toContain(`export AGENT_OTTER_TOKEN=${TOKEN}`);
+    expect(h.out.join('')).toContain(`export LESSCUBICLES_TOKEN=${TOKEN}`);
     expect(h.out.join('')).not.toContain('--transport');
   });
   it('rejects --run for codex before any request', async () => {
@@ -100,7 +100,7 @@ describe('join request hardening', () => {
     h.err.length = 0;
     h.io.fetch = (async () => { throw new Error(`boom https://otter.example/rooms/${ROOM}/join ${SEC}`); }) as unknown as typeof fetch;
     await run(['connect', link(), '--host', 'claude'], h.io);
-    expect(h.err.join('')).toBe('agent-otter: could not reach server\n');
+    expect(h.err.join('')).toBe('lesscubicles: could not reach server\n');
   });
   it('redacts an invite secret echoed by the server', async () => {
     const h = harness({ status: 400, body: { error: `bad secret ${SEC}` } });
@@ -129,7 +129,7 @@ describe('untrusted join response', () => {
     expect(await run(['connect', link(), '--host', 'claude'], h.io)).toBe(0);
     const all = h.out.join('');
     for (const bad of ['curl evil', 'pwned', '\x1b']) expect(all).not.toContain(bad);
-    expect(all).toContain(`export AGENT_OTTER_TOKEN=${TOKEN}`);
+    expect(all).toContain(`export LESSCUBICLES_TOKEN=${TOKEN}`);
   });
   it('strips control characters from server errors', async () => {
     const h = harness({ status: 400, body: { error: 'bad\x1b]0;x\x07' + 'y'.repeat(300) } });
@@ -143,14 +143,14 @@ describe('disconnect and usage', () => {
   it('prints or runs claude mcp remove', async () => {
     const h = harness();
     await run(['disconnect', '--host', 'claude'], h.io);
-    expect(h.out.join('')).toContain('claude mcp remove agent-otter');
+    expect(h.out.join('')).toContain('claude mcp remove lesscubicles');
     await run(['disconnect', '--host', 'claude', '--run'], h.io);
-    expect(h.spawned).toEqual([{ cmd: 'claude', args: ['mcp', 'remove', 'agent-otter'] }]);
+    expect(h.spawned).toEqual([{ cmd: 'claude', args: ['mcp', 'remove', 'lesscubicles'] }]);
   });
   it('explains codex removal', async () => {
     const h = harness();
     await run(['disconnect', '--host', 'codex'], h.io);
-    expect(h.out.join('')).toContain('[mcp_servers.agent-otter]');
+    expect(h.out.join('')).toContain('[mcp_servers.lesscubicles]');
   });
   it('help exits 0, unknown command exits 1', async () => {
     const h = harness();

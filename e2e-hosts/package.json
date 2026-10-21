@@ -1,5 +1,5 @@
 {
-  "name": "@agent-otter/e2e-hosts",
+  "name": "@lesscubicles/e2e-hosts",
   "version": "0.0.1",
   "private": true,
   "type": "module",
@@ -9,7 +9,7 @@
     "hosts": "node scripts/run.mjs --force"
   },
   "dependencies": {
-    "@agent-otter/protocol": "workspace:*"
+    "@lesscubicles/protocol": "workspace:*"
   },
   "devDependencies": {
     "@modelcontextprotocol/client": "^2.3.1",

@@ -1,5 +1,5 @@
 {
-  "name": "@agent-otter/e2e",
+  "name": "@lesscubicles/e2e",
   "version": "0.0.1",
   "private": true,
   "type": "module",
@@ -8,7 +8,7 @@
     "e2e": "playwright test"
   },
   "dependencies": {
-    "@agent-otter/protocol": "workspace:*"
+    "@lesscubicles/protocol": "workspace:*"
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.10.0",

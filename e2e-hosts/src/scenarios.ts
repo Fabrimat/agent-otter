@@ -1,5 +1,5 @@
 // Shared helpers for the host scenarios (H1..H4).
-import { ONBOARDING_PROMPT, TOOL_DESCRIPTIONS, AGENT_INSTRUCTIONS } from '@agent-otter/protocol';
+import { ONBOARDING_PROMPT, TOOL_DESCRIPTIONS, AGENT_INSTRUCTIONS } from '@lesscubicles/protocol';
 import { runClaude, runCodex, SERVER_NAME, type HostRun, type ToolCall } from './hosts.js';
 import { sleep, type AgentT, type RoomT } from './harness.js';
 

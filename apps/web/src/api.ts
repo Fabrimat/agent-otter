@@ -2,7 +2,7 @@
 import {
   AdminResponse, CreateRoomResponse, ErrorResponse, HEADERS, JoinResponse, MessagesResponse, PublicConfig, ROUTES, RoomPublicInfo, WsTicketResponse,
   type CreateRoomRequest, type ErrorCode, type JoinRequest,
-} from '@agent-otter/protocol';
+} from '@lesscubicles/protocol';
 type Schema<T> = { safeParse(x: unknown): { success: true; data: T } | { success: false } };
 
 export class ApiError extends Error {

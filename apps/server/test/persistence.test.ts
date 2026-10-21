@@ -5,7 +5,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { MessagesResponse, OperatorRoomsResponse, ROUTES, RoomPublicInfo, RotateSecretsResponse } from '@agent-otter/protocol';
+import { MessagesResponse, OperatorRoomsResponse, ROUTES, RoomPublicInfo, RotateSecretsResponse } from '@lesscubicles/protocol';
 import { openDb } from '../src/db.js';
 import { boot, freshDb, headers, parseSeq, sleep } from './helpers.js';
 

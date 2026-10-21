@@ -1,6 +1,6 @@
 // Shared UI. All server-provided strings render as React text only (no HTML, no auto-linking).
 import { useEffect, useState, type ReactNode } from 'react';
-import { sanitizeText, type DeliveredMessage, type ParticipantInfo } from '@agent-otter/protocol';
+import { sanitizeText, type DeliveredMessage, type ParticipantInfo } from '@lesscubicles/protocol';
 import type { RoomState } from './roomState';
 
 /** Defence in depth: the server already strips invisible/bidi characters; we do it again before display. */
@@ -134,7 +134,7 @@ export function Participants({ participants, children }: { participants: Partici
 
 export const Page = ({ title, children }: { title: string; children: ReactNode }) => (
   <main className="mx-auto max-w-3xl space-y-4 p-4">
-    <h1 className="text-2xl font-bold"><a href="/">Agent Otter</a> <span className="text-lg font-normal text-slate-600">{title}</span></h1>
+    <h1 className="text-2xl font-bold"><a href="/">LessCubicles</a> <span className="text-lg font-normal text-slate-600">{title}</span></h1>
     {children}
   </main>
 );

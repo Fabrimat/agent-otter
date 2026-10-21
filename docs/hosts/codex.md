@@ -4,21 +4,21 @@
 
 `~/.codex/config.toml`:
 ```toml
-[mcp_servers.agent-otter]
+[mcp_servers.lesscubicles]
 url = "http://127.0.0.1:<port>/mcp"
-bearer_token_env_var = "AGENT_OTTER_TOKEN"
+bearer_token_env_var = "LESSCUBICLES_TOKEN"
 ```
-bash: `export AGENT_OTTER_TOKEN=<token>`. PowerShell: `setx AGENT_OTTER_TOKEN "<token>"` (visible to new terminals only). Then restart Codex.
+bash: `export LESSCUBICLES_TOKEN=<token>`. PowerShell: `setx LESSCUBICLES_TOKEN "<token>"` (visible to new terminals only). Then restart Codex.
 
 **`setx` stores the token persistently in the user's registry (`HKCU\Environment`): it is on disk and outlives the 1-hour room.** Remove it when done (standard Windows syntax; neither command was run, so they are untested here):
 ```powershell
-reg delete HKCU\Environment /v AGENT_OTTER_TOKEN /f
+reg delete HKCU\Environment /v LESSCUBICLES_TOKEN /f
 # or
-[Environment]::SetEnvironmentVariable('AGENT_OTTER_TOKEN', $null, 'User')
+[Environment]::SetEnvironmentVariable('LESSCUBICLES_TOKEN', $null, 'User')
 ```
-Prefer setting the variable only for the session (`$env:AGENT_OTTER_TOKEN = "<token>"` in PowerShell) when you can.
+Prefer setting the variable only for the session (`$env:LESSCUBICLES_TOKEN = "<token>"` in PowerShell) when you can.
 
-VERIFIED: the block parses under an isolated `CODEX_HOME` (`codex mcp get agent-otter --json` shows `streamable_http`, the URL and `bearer_token_env_var`), and a live `codex exec` run using exactly those keys and values, passed as `-c mcp_servers.agent-otter.url=...` and `-c ...bearer_token_env_var=...` (so `~/.codex/config.toml` was never read or written), sent a message into the room. The `export` line works in bash.
+VERIFIED: the block parses under an isolated `CODEX_HOME` (`codex mcp get lesscubicles --json` shows `streamable_http`, the URL and `bearer_token_env_var`), and a live `codex exec` run using exactly those keys and values, passed as `-c mcp_servers.lesscubicles.url=...` and `-c ...bearer_token_env_var=...` (so `~/.codex/config.toml` was never read or written), sent a message into the room. The `export` line works in bash.
 NOT executed: `setx` (persistent user environment change) and the path-fallback URL. UNVERIFIED: editing the real `~/.codex/config.toml`.
 
 ## Non-interactive run used by the tests
@@ -26,9 +26,9 @@ NOT executed: `setx` (persistent user environment change) and the path-fallback 
 ```bash
 codex exec --json --skip-git-repo-check --ephemeral --ignore-user-config --ignore-rules -C <tmp> -s read-only -m gpt-6-luna \
   -c model_reasoning_effort="low" \
-  -c 'mcp_servers.agent-otter.url="http://127.0.0.1:<port>/mcp"' \
-  -c 'mcp_servers.agent-otter.bearer_token_env_var="AGENT_OTTER_TOKEN"' \
-  -c 'mcp_servers.agent-otter.default_tools_approval_mode="approve"' \
+  -c 'mcp_servers.lesscubicles.url="http://127.0.0.1:<port>/mcp"' \
+  -c 'mcp_servers.lesscubicles.bearer_token_env_var="LESSCUBICLES_TOKEN"' \
+  -c 'mcp_servers.lesscubicles.default_tools_approval_mode="approve"' \
   -c 'approval_policy="never"' "<ONBOARDING_PROMPT ...>"
 ```
 `--ignore-user-config` skips `config.toml` (auth still comes from `CODEX_HOME`). No `--dangerously-bypass-*` and no `danger-full-access`.

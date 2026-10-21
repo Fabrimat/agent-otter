@@ -1,6 +1,6 @@
 import { isIPv4, isIPv6 } from 'node:net';
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import type { ErrorCode, ErrorResponse } from '@agent-otter/protocol';
+import type { ErrorCode, ErrorResponse } from '@lesscubicles/protocol';
 import { StoreError } from './errors.js';
 
 export const STATUS: Record<ErrorCode, number> = {
